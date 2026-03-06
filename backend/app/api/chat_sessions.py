@@ -68,9 +68,8 @@ async def list_sessions(
             raise HTTPException(status_code=403, detail="Not authorized to view all sessions")
 
         # Fetch all sessions with display names
-        from sqlalchemy import coalesce
         result = await db.execute(
-            select(ChatSession, coalesce(User.display_name, User.username).label("display"))
+            select(ChatSession, func.coalesce(User.display_name, User.username).label("display"))
             .join(User, ChatSession.user_id == User.id)
             .where(ChatSession.agent_id == agent_id)
             .order_by(ChatSession.last_message_at.desc().nulls_last(), ChatSession.created_at.desc())
