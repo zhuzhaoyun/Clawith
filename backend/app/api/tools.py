@@ -53,8 +53,15 @@ async def list_tools(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all available tools."""
-    result = await db.execute(select(Tool).order_by(Tool.category, Tool.name))
+    """List platform tools (excludes agent-installed MCP tools — those live under /agent-installed)."""
+    # Exclude tools that were installed by agents via import_mcp_server
+    from sqlalchemy import exists as _exists
+    agent_installed_tids = select(AgentTool.tool_id).where(AgentTool.source == "user_installed")
+    result = await db.execute(
+        select(Tool)
+        .where(~Tool.id.in_(agent_installed_tids))
+        .order_by(Tool.category, Tool.name)
+    )
     tools = result.scalars().all()
     return [
         {

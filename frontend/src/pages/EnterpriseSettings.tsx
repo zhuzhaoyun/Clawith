@@ -940,7 +940,7 @@ export default function EnterpriseSettings() {
                         {/* Sub-tab pills */}
                         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
                             {([['global', '🔧 Global Tools'], ['agent-installed', '🤖 Agent-installed']] as const).map(([key, label]) => (
-                                <button key={key} onClick={() => setToolsView(key as any)} style={{
+                                <button key={key} onClick={() => { setToolsView(key as any); if (key === 'agent-installed') loadAgentInstalledTools(); }} style={{
                                     padding: '4px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', border: 'none',
                                     background: toolsView === key ? 'var(--accent-color)' : 'var(--bg-tertiary)',
                                     color: toolsView === key ? '#fff' : 'var(--text-secondary)', transition: 'all 0.15s',
@@ -970,7 +970,11 @@ export default function EnterpriseSettings() {
                                                 </div>
                                                 <button className="btn btn-ghost" style={{ color: 'var(--error)', fontSize: '12px' }} onClick={async () => {
                                                     if (!confirm(`Remove "${row.tool_display_name}" from agent?`)) return;
-                                                    await fetchJson(`/tools/agent-tool/${row.agent_tool_id}`, { method: 'DELETE' });
+                                                    try {
+                                                        await fetchJson(`/tools/agent-tool/${row.agent_tool_id}`, { method: 'DELETE' });
+                                                    } catch {
+                                                        // Already deleted (e.g. removed via Global Tools) — just refresh
+                                                    }
                                                     loadAgentInstalledTools();
                                                 }}>🗑️ Delete</button>
                                             </div>
@@ -1099,6 +1103,7 @@ export default function EnterpriseSettings() {
                                                             if (!confirm(`${t('common.delete')} ${tool.display_name}?`)) return;
                                                             await fetchJson(`/tools/${tool.id}`, { method: 'DELETE' });
                                                             loadAllTools();
+                                                            loadAgentInstalledTools(); // cross-refresh in case it was also in agent-installed
                                                         }}>{t('common.delete')}</button>
                                                     )}
                                                     <label style={{ position: 'relative', display: 'inline-block', width: '40px', height: '22px', cursor: 'pointer' }}>
