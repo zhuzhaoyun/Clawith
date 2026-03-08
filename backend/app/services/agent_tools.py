@@ -1482,15 +1482,7 @@ async def _send_feishu_message(agent_id: uuid.UUID, args: dict) -> str:
             import json as _json
             from app.models.system_settings import SystemSetting
 
-            # Load agent name to sign the message
-            from app.models.agent import Agent as _AgentModel
-            _agent_r = await db.execute(select(_AgentModel).where(_AgentModel.id == agent_id))
-            _agent = _agent_r.scalar_one_or_none()
-            agent_display_name = _agent.name if _agent else "AI Assistant"
-
-            # Prepend agent identity so the recipient knows who sent it
-            signed_message = f"[{agent_display_name} · Clawith]\n{message_text}"
-            content = _json.dumps({"text": signed_message}, ensure_ascii=False)
+            content = _json.dumps({"text": message_text}, ensure_ascii=False)
 
             async def _try_send(app_id: str, app_secret: str, open_id: str) -> dict:
                 return await feishu_service.send_message(
