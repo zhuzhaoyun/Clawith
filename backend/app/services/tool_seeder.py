@@ -95,23 +95,91 @@ BUILTIN_TOOLS = [
         "config": {},
         "config_schema": {},
     },
+    # --- Pulse trigger management tools ---
     {
-        "name": "manage_tasks",
-        "display_name": "Task Manager",
-        "description": "Manage tasks (create, update status, delete). Changes sync to the database and task board.",
-        "category": "task",
-        "icon": "📋",
+        "name": "set_trigger",
+        "display_name": "Set Trigger",
+        "description": "Set a new trigger to wake yourself up at a specific time or condition. Trigger types: 'cron' (recurring schedule), 'once' (fire once at a time), 'interval' (every N minutes), 'poll' (HTTP monitoring), 'on_message' (when another agent replies).",
+        "category": "pulse",
+        "icon": "⚡",
         "is_default": True,
         "parameters_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["create", "update_status", "delete"], "description": "Action type"},
-                "title": {"type": "string", "description": "Task title"},
-                "description": {"type": "string", "description": "Task description (optional)"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"], "description": "Priority level"},
-                "status": {"type": "string", "enum": ["pending", "doing", "done"], "description": "New status (for update_status)"},
+                "name": {"type": "string", "description": "Unique name for this trigger"},
+                "type": {"type": "string", "enum": ["cron", "once", "interval", "poll", "on_message"], "description": "Trigger type"},
+                "config": {"type": "object", "description": "Type-specific config. cron: {\"expr\": \"0 9 * * *\"}. once: {\"at\": \"2026-03-10T09:00:00+08:00\"}. interval: {\"minutes\": 30}. poll: {\"url\": \"...\", \"json_path\": \"$.status\"}. on_message: {\"from_agent_name\": \"Morty\"}"},
+                "reason": {"type": "string", "description": "What to do when this trigger fires"},
+                "agenda_ref": {"type": "string", "description": "Optional: which agenda item this relates to"},
             },
-            "required": ["action", "title"],
+            "required": ["name", "type", "config", "reason"],
+        },
+        "config": {},
+        "config_schema": {},
+    },
+    {
+        "name": "update_trigger",
+        "display_name": "Update Trigger",
+        "description": "Update an existing trigger's configuration or reason.",
+        "category": "pulse",
+        "icon": "🔄",
+        "is_default": True,
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name of the trigger to update"},
+                "config": {"type": "object", "description": "New config (replaces existing)"},
+                "reason": {"type": "string", "description": "New reason text"},
+            },
+            "required": ["name"],
+        },
+        "config": {},
+        "config_schema": {},
+    },
+    {
+        "name": "cancel_trigger",
+        "display_name": "Cancel Trigger",
+        "description": "Cancel (disable) a trigger by name. Use when a task is completed.",
+        "category": "pulse",
+        "icon": "⏹️",
+        "is_default": True,
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name of the trigger to cancel"},
+            },
+            "required": ["name"],
+        },
+        "config": {},
+        "config_schema": {},
+    },
+    {
+        "name": "list_triggers",
+        "display_name": "List Triggers",
+        "description": "List all your active triggers with name, type, config, reason, fire count, and status.",
+        "category": "pulse",
+        "icon": "📋",
+        "is_default": True,
+        "parameters_schema": {
+            "type": "object",
+            "properties": {},
+        },
+        "config": {},
+        "config_schema": {},
+    },
+    {
+        "name": "send_channel_file",
+        "display_name": "Send File",
+        "description": "Send a file to the user via the current communication channel (Feishu, Slack, Discord, or web).",
+        "category": "communication",
+        "icon": "📎",
+        "is_default": True,
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Workspace-relative path to the file"},
+            },
+            "required": ["file_path"],
         },
         "config": {},
         "config_schema": {},
@@ -478,7 +546,7 @@ async def seed_builtin_tools():
             print(f"[ToolSeeder] Auto-assigned {len(new_tool_ids)} new tools to {len(agent_ids)} agents")
 
         # Remove obsolete tools that have been replaced
-        OBSOLETE_TOOLS = ["bing_search", "read_webpage"]
+        OBSOLETE_TOOLS = ["bing_search", "read_webpage", "manage_tasks"]
         for obsolete_name in OBSOLETE_TOOLS:
             result = await db.execute(select(Tool).where(Tool.name == obsolete_name))
             obsolete = result.scalar_one_or_none()

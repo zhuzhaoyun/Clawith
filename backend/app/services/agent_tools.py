@@ -108,56 +108,6 @@ AGENT_TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "manage_tasks",
-            "description": "Manage tasks (create, update status, delete). For supervision tasks, specify type='supervision' with a target person name and remind schedule.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["create", "update_status", "delete"],
-                        "description": "Action type",
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Task title (required for create, used to match for update/delete)",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Task description (optional for create)",
-                    },
-                    "priority": {
-                        "type": "string",
-                        "enum": ["low", "medium", "high", "urgent"],
-                        "description": "Priority level (optional, defaults to medium)",
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["pending", "doing", "done"],
-                        "description": "New status (required for update_status)",
-                    },
-                    "task_type": {
-                        "type": "string",
-                        "enum": ["todo", "supervision"],
-                        "description": "Task type: 'todo' for normal tasks (default), 'supervision' for follow-up/reminder tasks",
-                    },
-                    "supervision_target_name": {
-                        "type": "string",
-                        "description": "Target person name for supervision tasks (who to remind)",
-                    },
-                    "remind_schedule": {
-                        "type": "string",
-                        "enum": ["daily", "every_2_days", "every_3_days", "weekly"],
-                        "description": "Reminder frequency for supervision tasks: 'daily', 'every_2_days', 'every_3_days', or 'weekly'",
-                    },
-                },
-                "required": ["action", "title"],
-            },
-        },
-    },
     # --- Trigger management tools (Pulse engine) ---
     {
         "type": "function",

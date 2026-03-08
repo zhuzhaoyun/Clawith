@@ -39,17 +39,28 @@ function NotificationBar() {
         }
     }, [config?.text]);
 
-    if (!config?.enabled || !config?.text || dismissed) return null;
+    // Manage body class: add when visible, remove when hidden or dismissed
+    const isVisible = !!config?.enabled && !!config?.text && !dismissed;
+    useEffect(() => {
+        if (isVisible) {
+            document.body.classList.add('has-notification-bar');
+        } else {
+            document.body.classList.remove('has-notification-bar');
+        }
+        return () => { document.body.classList.remove('has-notification-bar'); };
+    }, [isVisible]);
+
+    if (!isVisible) return null;
 
     const handleDismiss = () => {
-        const key = `notification_bar_dismissed_${btoa(encodeURIComponent(config.text))}`;
+        const key = `notification_bar_dismissed_${btoa(encodeURIComponent(config!.text))}`;
         sessionStorage.setItem(key, '1');
         setDismissed(true);
     };
 
     return (
         <div className="notification-bar">
-            <span className="notification-bar-text">{config.text}</span>
+            <span className="notification-bar-text">{config!.text}</span>
             <button className="notification-bar-close" onClick={handleDismiss} aria-label="Close">✕</button>
         </div>
     );
@@ -74,20 +85,6 @@ export default function App() {
         }
     }, []);
 
-    // Toggle has-notification-bar class on body for layout adjustments
-    const [showBar, setShowBar] = useState(false);
-    useEffect(() => {
-        fetch('/api/enterprise/system-settings/notification_bar/public')
-            .then(r => r.ok ? r.json() : null)
-            .then(d => {
-                if (d?.enabled && d?.text) {
-                    setShowBar(true);
-                    document.body.classList.add('has-notification-bar');
-                }
-            })
-            .catch(() => { });
-        return () => { document.body.classList.remove('has-notification-bar'); };
-    }, []);
 
     if (loading) {
         return (

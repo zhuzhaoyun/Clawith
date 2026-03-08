@@ -86,8 +86,8 @@
 
   /* Notification bar */
   --notification-bar-bg: var(--accent-primary);
-  --notification-bar-text: var(--accent-btn-text, #0a0a0f);
-  --notification-bar-close-hover: rgba(0, 0, 0, 0.15);
+  --notification-bar-text: #ffffff;
+  --notification-bar-close-hover: rgba(255, 255, 255, 0.2);
 }
 
 /* ─── Notification Bar ──────────────────────────────── */
@@ -190,8 +190,8 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
 
-  /* Light mode: default accent is dark (#3a3a42), so text must be white */
-  --notification-bar-text: var(--accent-btn-text, #ffffff);
+  /* Light mode: notification bar always white text */
+  --notification-bar-text: #ffffff;
   --notification-bar-close-hover: rgba(255, 255, 255, 0.2);
 }
 

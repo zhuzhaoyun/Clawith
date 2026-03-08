@@ -128,6 +128,7 @@ export default function Login() {
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '6px 12px', borderRadius: '8px',
                     background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                    zIndex: 101,
                 }} onClick={toggleLang}>
                     🌐 {i18n.language === 'zh' ? 'EN' : '中文'}
                 </div>

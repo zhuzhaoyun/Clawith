@@ -451,8 +451,8 @@ function NotificationBarConfig() {
                         const b = parseInt(h.substring(4, 6), 16) / 255;
                         return 0.299 * r + 0.587 * g + 0.114 * b;
                     };
-                    const darkText = hexLum(darkAccent) > 0.5 ? '#0a0a0f' : '#ffffff';
-                    const lightText = hexLum(lightAccent) > 0.5 ? '#0a0a0f' : '#ffffff';
+                    const darkText = '#ffffff';
+                    const lightText = '#ffffff';
                     const barStyle = (bg: string, fg: string) => ({
                         height: '32px', borderRadius: '6px', display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: '12px', fontWeight: 500, background: bg, color: fg,
