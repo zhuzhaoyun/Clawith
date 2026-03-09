@@ -51,6 +51,16 @@ const SidebarIcons = {
             <path d="M2 8h12M8 2a10 10 0 013 6 10 10 0 01-3 6 10 10 0 01-3-6 10 10 0 013-6z" />
         </svg>
     ),
+    collapse: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+        </svg>
+    ),
+    expand: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18l6-6-6-6" />
+        </svg>
+    ),
 };
 
 const fetchJson = async <T,>(url: string): Promise<T> => {
@@ -87,6 +97,19 @@ export default function Layout() {
     }, [theme]);
 
     const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+
+    // Sidebar collapse state
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+        return localStorage.getItem('sidebar_collapsed') === 'true';
+    });
+
+    const toggleSidebar = () => {
+        setIsSidebarCollapsed(prev => {
+            const newState = !prev;
+            localStorage.setItem('sidebar_collapsed', String(newState));
+            return newState;
+        });
+    };
 
     // Tenant state
     const [currentTenant, setCurrentTenant] = useState(() => localStorage.getItem('current_tenant_id') || '');
@@ -151,167 +174,184 @@ export default function Layout() {
 
     return (
         <div className="app-layout">
-            <nav className="sidebar">
-                <div className="sidebar-logo"><img src="/logo.png" alt="" style={{ width: 22, height: 22 }} />Clawith</div>
+            <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+                <div className="sidebar-top">
+                    <div className="sidebar-logo">
+                        <img src="/logo.png" alt="" style={{ width: 22, height: 22 }} />
+                        <span className="sidebar-logo-text">Clawith</span>
+                    </div>
 
-                {/* Company Switcher */}
-                {user?.role === 'platform_admin' && (
-                    <div style={{ padding: '0 12px 8px', borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px' }}>
-                        <select
-                            value={currentTenant}
-                            onChange={e => switchTenant(e.target.value)}
-                            style={{
-                                width: '100%', padding: '6px 8px', fontSize: '12px',
-                                background: 'var(--bg-secondary)', color: 'var(--text-primary)',
-                                border: '1px solid var(--border-subtle)', borderRadius: '6px',
-                                cursor: 'pointer',
-                            }}
-                        >
-                            {tenants.map((t: any) => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                        </select>
-                        {showNewCompany ? (
-                            <div style={{ marginTop: '6px', display: 'flex', gap: '4px' }}>
-                                <input
-                                    value={newCompanyName}
-                                    onChange={e => setNewCompanyName(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && createCompany()}
-                                    placeholder={t('layout.companyName')}
-                                    style={{
-                                        flex: 1, padding: '4px 6px', fontSize: '11px',
-                                        background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-                                        border: '1px solid var(--border-subtle)', borderRadius: '4px',
-                                    }}
-                                    autoFocus
-                                />
-                                <button onClick={createCompany} style={{
-                                    fontSize: '11px', padding: '4px 6px',
-                                    background: 'var(--accent-primary)', color: 'white',
-                                    border: 'none', borderRadius: '4px', cursor: 'pointer',
-                                }}>{t('layout.create')}</button>
-                                <button onClick={() => { setShowNewCompany(false); setNewCompanyName(''); }} style={{
-                                    fontSize: '11px', padding: '4px 6px',
-                                    background: 'transparent', color: 'var(--text-tertiary)',
-                                    border: 'none', cursor: 'pointer',
-                                }}>✕</button>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={() => setShowNewCompany(true)}
+                    {/* Company Switcher */}
+                    {user?.role === 'platform_admin' && (
+                        <div className="tenant-switcher" style={{ padding: '0 12px 8px', borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px' }}>
+                            <select
+                                value={currentTenant}
+                                onChange={e => switchTenant(e.target.value)}
                                 style={{
-                                    marginTop: '4px', width: '100%', padding: '4px', fontSize: '11px',
-                                    background: 'transparent', color: 'var(--text-tertiary)',
-                                    border: '1px dashed var(--border-subtle)', borderRadius: '4px',
-                                    cursor: 'pointer', textAlign: 'center',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                                    width: '100%', padding: '6px 8px', fontSize: '12px',
+                                    background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                                    border: '1px solid var(--border-subtle)', borderRadius: '6px',
+                                    cursor: 'pointer',
                                 }}
                             >
-                                {SidebarIcons.plus} {t('layout.newCompany')}
-                            </button>
+                                {tenants.map((t: any) => (
+                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                ))}
+                            </select>
+                            {showNewCompany ? (
+                                <div style={{ marginTop: '6px', display: 'flex', gap: '4px' }}>
+                                    <input
+                                        value={newCompanyName}
+                                        onChange={e => setNewCompanyName(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && createCompany()}
+                                        placeholder={t('layout.companyName')}
+                                        style={{
+                                            flex: 1, padding: '4px 6px', fontSize: '11px',
+                                            background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+                                            border: '1px solid var(--border-subtle)', borderRadius: '4px',
+                                        }}
+                                        autoFocus
+                                    />
+                                    <button onClick={createCompany} style={{
+                                        fontSize: '11px', padding: '4px 6px',
+                                        background: 'var(--accent-primary)', color: 'white',
+                                        border: 'none', borderRadius: '4px', cursor: 'pointer',
+                                    }}>{t('layout.create')}</button>
+                                    <button onClick={() => { setShowNewCompany(false); setNewCompanyName(''); }} style={{
+                                        fontSize: '11px', padding: '4px 6px',
+                                        background: 'transparent', color: 'var(--text-tertiary)',
+                                        border: 'none', cursor: 'pointer',
+                                    }}>✕</button>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setShowNewCompany(true)}
+                                    style={{
+                                        marginTop: '4px', width: '100%', padding: '4px', fontSize: '11px',
+                                        background: 'transparent', color: 'var(--text-tertiary)',
+                                        border: '1px dashed var(--border-subtle)', borderRadius: '4px',
+                                        cursor: 'pointer', textAlign: 'center',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                                    }}
+                                >
+                                    {SidebarIcons.plus} {t('layout.newCompany')}
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    {user?.role !== 'platform_admin' && user?.tenant_id && (
+                        <div className="tenant-name" style={{
+                            padding: '0 16px 8px', fontSize: '11px', color: 'var(--text-secondary)',
+                            borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                        }}>
+                            {currentTenantName || t('layout.myCompany')}
+                        </div>
+                    )}
+
+                    <div className="sidebar-section">
+                        <NavLink to="/plaza" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
+                            <span className="sidebar-item-icon" style={{ display: 'flex', fontSize: '14px' }}>🏛️</span>
+                            <span className="sidebar-item-text">{t('nav.plaza', 'Plaza')}</span>
+                        </NavLink>
+                        <NavLink to="/dashboard" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
+                            <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.home}</span>
+                            <span className="sidebar-item-text">{t('nav.dashboard')}</span>
+                        </NavLink>
+                    </div>
+                </div>
+
+                <div className="sidebar-scrollable">
+                    <div className="sidebar-section">
+                        <div className="sidebar-section-title">{t('nav.myAgents')}</div>
+                        {agents.map((agent) => (
+                            <NavLink
+                                key={agent.id}
+                                to={`/agents/${agent.id}`}
+                                className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
+                                title={agent.name}
+                            >
+                                <span className="sidebar-item-icon">
+                                    <span className={`status-dot ${statusDotClass(agent.status)}`} />
+                                </span>
+                                <span className="sidebar-item-text">{agent.name}</span>
+                            </NavLink>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="sidebar-bottom">
+                    <div className="sidebar-section" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px', marginBottom: 0 }}>
+                        {user && (
+                            <NavLink to="/agents/new" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={t('nav.newAgent')}>
+                                <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.plus}</span>
+                                <span className="sidebar-item-text">{t('nav.newAgent')}</span>
+                            </NavLink>
+                        )}
+                        {user && ['platform_admin', 'org_admin'].includes(user.role) && (
+                            <NavLink to="/enterprise" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={t('nav.enterprise')}>
+                                <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.settings}</span>
+                                <span className="sidebar-item-text">{t('nav.enterprise')}</span>
+                            </NavLink>
+                        )}
+                        {user && user.role === 'platform_admin' && (
+                            <NavLink to="/invitations" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`} title={t('nav.invitations', 'Invitation Codes')}>
+                                <span className="sidebar-item-icon" style={{ display: 'flex' }}>🎟️</span>
+                                <span className="sidebar-item-text">{t('nav.invitations', 'Invitation Codes')}</span>
+                            </NavLink>
                         )}
                     </div>
-                )}
-                {user?.role !== 'platform_admin' && user?.tenant_id && (
-                    <div style={{
-                        padding: '0 16px 8px', fontSize: '11px', color: 'var(--text-secondary)',
-                        borderBottom: '1px solid var(--border-subtle)', marginBottom: '4px',
-                    }}>
-                        {currentTenantName || t('layout.myCompany')}
-                    </div>
-                )}
 
-                <div className="sidebar-section">
-                    <NavLink to="/plaza" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
-                        <span className="sidebar-item-icon" style={{ display: 'flex', fontSize: '14px' }}>🏛️</span>
-                        {t('nav.plaza', 'Plaza')}
-                    </NavLink>
-                    <NavLink to="/dashboard" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
-                        <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.home}</span>
-                        {t('nav.dashboard')}
-                    </NavLink>
-                </div>
-
-                <div className="sidebar-section">
-                    <div className="sidebar-section-title">{t('nav.myAgents')}</div>
-                    {agents.map((agent) => (
-                        <NavLink
-                            key={agent.id}
-                            to={`/agents/${agent.id}`}
-                            className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
-                        >
-                            <span className="sidebar-item-icon">
-                                <span className={`status-dot ${statusDotClass(agent.status)}`} />
-                            </span>
-                            {agent.name}
-                        </NavLink>
-                    ))}
-                </div>
-
-                <div className="sidebar-section">
-                    {user && (
-                        <NavLink to="/agents/new" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
-                            <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.plus}</span>
-                            {t('nav.newAgent')}
-                        </NavLink>
-                    )}
-                    {user && ['platform_admin', 'org_admin'].includes(user.role) && (
-                        <NavLink to="/enterprise" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
-                            <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.settings}</span>
-                            {t('nav.enterprise')}
-                        </NavLink>
-                    )}
-                    {user && user.role === 'platform_admin' && (
-                        <NavLink to="/invitations" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
-                            <span className="sidebar-item-icon" style={{ display: 'flex' }}>🎟️</span>
-                            {t('nav.invitations', 'Invitation Codes')}
-                        </NavLink>
-                    )}
-                </div>
-
-                <div className="sidebar-footer">
-                    <div style={{
-                        display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '12px',
-                    }}>
-                        <button className="btn btn-ghost" onClick={toggleTheme} style={{
-                            fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px',
-                            padding: '4px 8px',
+                    <div className="sidebar-footer">
+                        <div className="sidebar-footer-controls" style={{
+                            display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '12px',
                         }}>
-                            {theme === 'dark' ? SidebarIcons.sun : SidebarIcons.moon}
-                        </button>
-                        <button className="btn btn-ghost" onClick={toggleLang} style={{
-                            fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px',
-                            padding: '4px 8px',
-                        }}>
-                            {SidebarIcons.globe}
-                            <span>{i18n.language === 'zh' ? '中文' : 'EN'}</span>
-                        </button>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{
-                            width: '28px', height: '28px', borderRadius: 'var(--radius-md)',
-                            background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: 'var(--text-tertiary)',
-                        }}>
-                            {SidebarIcons.user}
+                            <button className="btn btn-ghost" onClick={toggleSidebar} style={{
+                                padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }} title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}>
+                                {isSidebarCollapsed ? SidebarIcons.expand : SidebarIcons.collapse}
+                            </button>
+                            <div style={{ flex: 1 }} />
+                            <button className="btn btn-ghost" onClick={toggleTheme} style={{
+                                fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px',
+                                padding: '4px 8px',
+                            }}>
+                                {theme === 'dark' ? SidebarIcons.sun : SidebarIcons.moon}
+                            </button>
+                            <button className="btn btn-ghost" onClick={toggleLang} style={{
+                                fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px',
+                                padding: '4px 8px',
+                            }}>
+                                {SidebarIcons.globe}
+                                <span>{i18n.language === 'zh' ? '中文' : 'EN'}</span>
+                            </button>
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {user?.display_name}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{
+                                width: '28px', height: '28px', borderRadius: 'var(--radius-md)',
+                                background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: 'var(--text-tertiary)', flexShrink: 0,
+                            }}>
+                                {SidebarIcons.user}
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                                {user?.role === 'platform_admin' ? t('roles.platformAdmin') :
-                                    user?.role === 'org_admin' ? t('roles.orgAdmin') :
-                                        user?.role === 'agent_admin' ? t('roles.agentAdmin') : t('roles.member')}
+                            <div className="sidebar-footer-user-info" style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {user?.display_name}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                    {user?.role === 'platform_admin' ? t('roles.platformAdmin') :
+                                        user?.role === 'org_admin' ? t('roles.orgAdmin') :
+                                            user?.role === 'agent_admin' ? t('roles.agentAdmin') : t('roles.member')}
+                                </div>
                             </div>
+                            <button className="btn btn-ghost" onClick={handleLogout} style={{
+                                padding: '4px 6px', color: 'var(--text-tertiary)',
+                                display: 'flex', alignItems: 'center', flexShrink: 0,
+                            }} title={t('layout.logout', 'Logout')}>
+                                {SidebarIcons.logout}
+                            </button>
                         </div>
-                        <button className="btn btn-ghost" onClick={handleLogout} style={{
-                            padding: '4px 6px', color: 'var(--text-tertiary)',
-                            display: 'flex', alignItems: 'center',
-                        }}>
-                            {SidebarIcons.logout}
-                        </button>
                     </div>
                 </div>
             </nav>

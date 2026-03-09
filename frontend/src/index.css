@@ -81,7 +81,9 @@
   --transition-slow: 300ms ease;
 
   /* Layout */
-  --sidebar-width: 240px;
+  --sidebar-width-expanded: 240px;
+  --sidebar-width-collapsed: 68px;
+  --sidebar-width: var(--sidebar-width-expanded);
   --header-height: 52px;
 
   /* Notification bar */
@@ -290,13 +292,48 @@ select:focus {
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  padding: var(--space-4) 0;
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
-  overflow-y: auto;
   z-index: 10;
+  transition: width var(--transition-default);
+  overflow: hidden;
+}
+
+.sidebar-top {
+  padding-top: var(--space-4);
+  flex-shrink: 0;
+}
+
+.sidebar-scrollable {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scrollable::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.sidebar-scrollable:hover::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+}
+
+.sidebar-bottom {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .sidebar-logo {
@@ -313,7 +350,8 @@ select:focus {
 
 .sidebar-section {
   padding: var(--space-1) var(--space-3);
-  margin-top: var(--space-4);
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .sidebar-section-title {
@@ -337,6 +375,7 @@ select:focus {
   transition: all var(--transition-fast);
   cursor: pointer;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .sidebar-item:hover {
@@ -355,10 +394,16 @@ select:focus {
   flex-shrink: 0;
 }
 
+.sidebar-item-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity var(--transition-fast);
+}
+
 .sidebar-footer {
-  margin-top: auto;
   padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--border-subtle);
 }
 
 .main-content {
@@ -370,6 +415,71 @@ select:focus {
   max-width: calc(100vw - var(--sidebar-width));
   overflow-x: clip;
   box-sizing: border-box;
+  transition: all var(--transition-default);
+}
+
+/* ─── Collapsed Sidebar Overrides ───────────────────── */
+.sidebar.collapsed {
+  --sidebar-width: var(--sidebar-width-collapsed);
+}
+
+.sidebar.collapsed .sidebar-logo {
+  justify-content: center;
+  padding: var(--space-3) 0;
+}
+
+.sidebar.collapsed .sidebar-logo-text {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-section-title {
+  opacity: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-item {
+  justify-content: center;
+  padding: var(--space-2) 0;
+}
+
+.sidebar.collapsed .sidebar-item-text {
+  opacity: 0;
+  width: 0;
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-item-icon {
+  margin: 0;
+}
+
+.sidebar.collapsed .tenant-switcher,
+.sidebar.collapsed .tenant-name {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding: var(--space-4) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sidebar.collapsed .sidebar-footer-controls {
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: 0 !important;
+}
+
+.sidebar.collapsed .sidebar-footer-user-info {
+  display: none;
+}
+
+.sidebar.collapsed .btn-ghost span {
+  display: none;
 }
 
 /* ─── Components ────────────────────────────────────── */
