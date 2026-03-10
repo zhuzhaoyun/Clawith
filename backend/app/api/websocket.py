@@ -176,6 +176,19 @@ async def call_llm(
             if text:
                 parts.append({"type": "text", "text": text})
             api_messages[i] = {**msg, "content": parts}
+    else:
+        # Strip base64 image markers for non-vision models to avoid wasting tokens
+        import re as _re_strip
+        _img_pattern = r'\[image_data:data:image/[^;]+;base64,[A-Za-z0-9+/=]+\]'
+        for i, msg in enumerate(api_messages):
+            if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
+                continue
+            if "[image_data:" in msg["content"]:
+                _n_imgs = len(_re_strip.findall(_img_pattern, msg["content"]))
+                cleaned = _re_strip.sub('', msg["content"]).strip()
+                if _n_imgs > 0:
+                    cleaned += f"\n[用户发送了 {_n_imgs} 张图片，但当前模型不支持视觉，无法查看图片内容]"
+                api_messages[i] = {**msg, "content": cleaned}
 
     # Determine base URL
     from app.services.llm_utils import get_provider_base_url, get_tool_params, get_max_tokens
