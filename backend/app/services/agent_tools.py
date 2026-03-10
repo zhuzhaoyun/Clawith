@@ -2270,7 +2270,7 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
     ttype = arguments.get("type", "").strip()
     config = arguments.get("config", {})
     reason = arguments.get("reason", "").strip()
-    focus_ref = arguments.get("focus_ref", "")
+    focus_ref = arguments.get("focus_ref", "") or arguments.get("agenda_ref", "")  # backward compat
 
     if not name:
         return "❌ Missing required argument 'name'"
