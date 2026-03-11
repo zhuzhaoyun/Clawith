@@ -442,6 +442,21 @@ export default function Chat() {
                             </div>
                         </div>
                     ))}
+                    {streaming && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
+                        <div className="chat-message assistant">
+                            <div className="chat-avatar" style={{ color: 'var(--text-tertiary)' }}>
+                                {Icons.bot}
+                            </div>
+                            <div className="chat-bubble">
+                                <div className="thinking-indicator">
+                                    <div className="thinking-dots">
+                                        <span /><span /><span />
+                                    </div>
+                                    <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>{t('agent.chat.thinking', 'Thinking...')}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     <div ref={messagesEndRef} />
                 </div>
 
