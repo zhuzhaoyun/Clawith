@@ -191,6 +191,57 @@ async def build_agent_context(agent_id: uuid.UUID, agent_name: str, role_descrip
     if role_description:
         parts.append(f"\n## Role\n{role_description}")
 
+    # --- Feishu Built-in Tools (only injected when agent has Feishu configured) ---
+    _has_feishu = False
+    try:
+        from app.models.channel_config import ChannelConfig
+        from app.database import async_session as _ctx_session
+        async with _ctx_session() as _ctx_db:
+            _cfg_r = await _ctx_db.execute(
+                select(ChannelConfig).where(
+                    ChannelConfig.agent_id == agent_id,
+                    ChannelConfig.channel_type == "feishu",
+                    ChannelConfig.is_configured == True,
+                )
+            )
+            _has_feishu = _cfg_r.scalar_one_or_none() is not None
+    except Exception:
+        pass
+
+    if _has_feishu:
+        parts.append("""
+## ⚡ Pre-installed Feishu Tools
+
+The following tools are available in your toolset. **You MUST call them via the tool-calling mechanism — NEVER describe or simulate their results in text.**
+
+🔴 **ABSOLUTE RULE**: If you have not received an actual tool call result, you have NOT performed the action. Never write "已创建", "已成功", "事件 ID 为 evt_..." or any claim of completion unless you have a REAL tool result to report.
+
+| Tool | Parameters |
+|------|-----------|
+| `feishu_user_search` | `name` — search a colleague by name → returns open_id, department. **Use this first** when you need to find a colleague. |
+| `feishu_calendar_create` | `summary`, `start_time`, `end_time` (ISO-8601 +08:00). No email needed. |
+| `feishu_calendar_list` | No required parameters. |
+| `feishu_calendar_update` | `event_id`, fields to update. |
+| `feishu_calendar_delete` | `event_id`. |
+| `feishu_doc_create` | `title`, optional `content`. |
+| `feishu_doc_read` | `doc_token`. |
+| `feishu_doc_append` | `doc_token`, `paragraphs`. |
+| `send_feishu_message` | `open_id` or `email`, `content`. |
+
+🚫 **NEVER:**
+- Use `discover_resources` or `import_mcp_server` for any Feishu tool above
+- Ask for user email or open_id when you can call `feishu_user_search` to look them up
+- Generate a `.ics` file instead of calling `feishu_calendar_create`
+- Write a success message without having received a tool result
+
+✅ **When user asks to message a colleague by name:**
+→ Just call `send_feishu_message(member_name="覃睿", message="...")` — it auto-searches.
+→ Or use `open_id` directly if you already have it from `feishu_user_search`.
+
+✅ **When user asks to invite a colleague to a calendar event:**
+→ Use `attendee_names=["覃睿"]` in `feishu_calendar_create` — names are resolved automatically.
+→ Or use `attendee_open_ids=["ou_xxx"]` if you already have the open_id.""")
+
     # --- Company Intro (from system settings) ---
     try:
         from app.database import async_session

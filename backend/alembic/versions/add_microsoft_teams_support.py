@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "add_microsoft_teams_support"
-down_revision = "add_agent_triggers"
+down_revision = "add_agent_usage_fields"
 branch_labels = None
 depends_on = None
 

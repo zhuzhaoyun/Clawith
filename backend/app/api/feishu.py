@@ -64,8 +64,19 @@ async def configure_channel(
         existing.app_secret = data.app_secret
         existing.encrypt_key = data.encrypt_key
         existing.verification_token = data.verification_token
+        existing.extra_config = data.extra_config or {}
         existing.is_configured = True
         await db.flush()
+        
+        # Start/Stop WS client in background
+        from app.services.feishu_ws import feishu_ws_manager
+        import asyncio
+        mode = existing.extra_config.get("connection_mode", "webhook")
+        if mode == "websocket":
+            asyncio.create_task(feishu_ws_manager.start_client(agent_id, existing.app_id, existing.app_secret))
+        else:
+            asyncio.create_task(feishu_ws_manager.stop_client(agent_id))
+        
         return ChannelConfigOut.model_validate(existing)
 
     config = ChannelConfig(
@@ -75,10 +86,19 @@ async def configure_channel(
         app_secret=data.app_secret,
         encrypt_key=data.encrypt_key,
         verification_token=data.verification_token,
+        extra_config=data.extra_config or {},
         is_configured=True,
     )
     db.add(config)
     await db.flush()
+
+    # Start WS client in background
+    from app.services.feishu_ws import feishu_ws_manager
+    import asyncio
+    mode = config.extra_config.get("connection_mode", "webhook")
+    if mode == "websocket":
+        asyncio.create_task(feishu_ws_manager.start_client(agent_id, config.app_id, config.app_secret))
+
     return ChannelConfigOut.model_validate(config)
 
 
@@ -147,12 +167,18 @@ async def feishu_event_webhook(
 ):
     """Handle Feishu event callback for a specific agent's bot."""
     body = await request.json()
-    import json as _json
-    print(f"[Feishu] Webhook received for {agent_id}: event_type={body.get('header', {}).get('event_type', 'N/A')}, body_keys={list(body.keys())}")
-
+    
     # Handle verification challenge
     if "challenge" in body:
         return {"challenge": body["challenge"]}
+
+    return await process_feishu_event(agent_id, body, db)
+
+
+async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession):
+    """Core logic to process feishu events from both webhook and WS client."""
+    import json as _json
+    print(f"[Feishu] Event processing for {agent_id}: event_type={body.get('header', {}).get('event_type', 'N/A')}")
 
     # Deduplicate — Feishu retries on slow responses
     event_id = body.get("header", {}).get("event_id", "")
@@ -337,7 +363,36 @@ async def feishu_event_webhook(
                             _user_info = _user_data.get("data", {}).get("user", {})
                             sender_name = _user_info.get("name", "")
                             sender_user_id_feishu = _user_info.get("user_id", "")
+                            sender_email = _user_info.get("email", "") or _user_info.get("enterprise_email", "")
                             print(f"[Feishu] Resolved sender: {sender_name} (user_id={sender_user_id_feishu})")
+                            # Cache sender info so feishu_user_search can find them by name
+                            if sender_name and sender_open_id:
+                                try:
+                                    import pathlib as _pl, json as _cj, time as _ct
+                                    _safe_id = str(agent_id).replace("..", "").replace("/", "")
+                                    _cache = _pl.Path(f"/data/workspaces/{_safe_id}/feishu_contacts_cache.json")
+                                    _cache.parent.mkdir(parents=True, exist_ok=True)
+                                    _existing = {}
+                                    if _cache.exists():
+                                        try:
+                                            _existing = _cj.loads(_cache.read_text())
+                                        except Exception:
+                                            pass
+                                    _users = {u["open_id"]: u for u in _existing.get("users", [])}
+                                    _users[sender_open_id] = {
+                                        "open_id": sender_open_id,
+                                        "name": sender_name,
+                                        "email": sender_email,
+                                        "user_id": sender_user_id_feishu,
+                                    }
+                                    _cache.write_text(_cj.dumps(
+                                        {"ts": _ct.time(), "users": list(_users.values())},
+                                        ensure_ascii=False,
+                                    ))
+                                    import os as _os
+                                    _os.chmod(str(_cache), 0o600)
+                                except Exception as _ce:
+                                    print(f"[Feishu] Cache write failed: {_ce}")
             except Exception as e:
                 print(f"[Feishu] Failed to resolve sender: {e}")
 
@@ -404,6 +459,45 @@ async def feishu_event_webhook(
                 id_part = f" (ID: {sender_user_id_feishu})" if sender_user_id_feishu else ""
                 llm_user_text = f"[发送者: {sender_name}{id_part}] {user_text}"
 
+            # ── Inject recent uploaded file context ──────────────────────────
+            # Check the uploads directory for recently modified files (within 30 min).
+            # This is more reliable than scanning DB history, because the file save
+            # to disk always succeeds even if the DB transaction fails.
+            try:
+                import time as _time
+                import pathlib as _pl
+                from app.config import get_settings as _gs
+                _upload_dir = _pl.Path(_gs().AGENT_DATA_DIR) / str(agent_id) / "workspace" / "uploads"
+                _recent_file_path = None
+                if _upload_dir.exists() and "uploads/" not in user_text and "workspace/" not in user_text:
+                    _now = _time.time()
+                    _candidates = sorted(
+                        _upload_dir.iterdir(),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                    for _fp in _candidates:
+                        if _fp.is_file() and (_now - _fp.stat().st_mtime) < 1800:  # 30 min
+                            _recent_file_path = f"uploads/{_fp.name}"
+                            break
+                if _recent_file_path:
+                    # _recent_file_path is relative to uploads dir; agent workspace root is
+                    # AGENT_DATA_DIR/{agent_id}/, so the correct relative path is workspace/uploads/
+                    _ws_rel_path = f"workspace/{_recent_file_path}"
+                    llm_user_text = (
+                        llm_user_text
+                        + f"\n\n[系统提示：用户刚上传了文件，路径为工作区 `{_ws_rel_path}`。"
+                        f"如果用户的指令涉及这篇文章、这个文件、这份文档等，"
+                        f"请立即调用 read_document(path=\"{_ws_rel_path}\") 读取内容，不要先用 list_files 验证，直接读取即可。]"
+                    )
+                    print(f"[Feishu] Injected recent file hint: {_ws_rel_path}")
+            except Exception as _fe:
+                print(f"[Feishu] File injection error: {_fe}")
+
+            # Set sender open_id contextvar so calendar tool can auto-invite the requester
+            from app.services.agent_tools import channel_feishu_sender_open_id as _cfso
+            _cfso_token = _cfso.set(sender_open_id)
+
             # Set channel_file_sender contextvar so the agent can send files back via Feishu
             from app.services.agent_tools import channel_file_sender as _cfs
             _reply_to_id = chat_id if chat_type == "group" else sender_open_id
@@ -447,10 +541,129 @@ async def feishu_event_webhook(
                     )
             _cfs_token = _cfs.set(_feishu_file_sender)
 
-            # Call LLM with history
-            reply_text = await _call_agent_llm(db, agent_id, llm_user_text, history=history, user_id=platform_user_id)
+            # Set up streaming response via interactive card
+            import time
+            import json as _json_card
+            import asyncio as _aio
+
+            # Send initial loading card
+            init_card = {
+                "config": {"update_multi": True},
+                "header": {"template": "blue", "title": {"content": "思考中...", "tag": "plain_text"}},
+                "elements": [{"tag": "markdown", "content": "..."}]
+            }
+            msg_id_for_patch = None
+            try:
+                if chat_type == "group" and chat_id:
+                    init_resp = await feishu_service.send_message(
+                        config.app_id, config.app_secret, chat_id, "interactive",
+                        _json_card.dumps(init_card), receive_id_type="chat_id"
+                    )
+                else:
+                    init_resp = await feishu_service.send_message(
+                        config.app_id, config.app_secret, sender_open_id, "interactive",
+                        _json_card.dumps(init_card), receive_id_type="open_id"
+                    )
+                msg_id_for_patch = init_resp.get("data", {}).get("message_id")
+            except Exception as e:
+                print(f"[Feishu] Failed to send init stream card: {e}")
+
+            _stream_buffer = []
+            _thinking_buffer = []
+            _last_flush_time = time.time()
+            _FLUSH_INTERVAL = 1.0  # Update Feishu once per second to avoid limits
+            _agent_name = agent_obj.name if agent_obj else "AI 回复"
+
+            def _build_card(answer_text: str, thinking_text: str = "", streaming: bool = False) -> dict:
+                """Build interactive card. Thinking shown in collapsible grey section."""
+                elements = []
+                if thinking_text:
+                    # Show thinking in a collapsible note block
+                    think_preview = thinking_text[:200].replace("\n", " ")
+                    elements.append({
+                        "tag": "markdown",
+                        "content": f"<font color='grey'>💭 **思考过程**\n{think_preview}{'...' if len(thinking_text) > 200 else ''}</font>",
+                    })
+                    elements.append({"tag": "hr"})
+                body = answer_text + ("▌" if streaming and answer_text else ("..." if streaming else ""))
+                elements.append({"tag": "markdown", "content": body or "..."})
+                return {
+                    "config": {"update_multi": True},
+                    "header": {
+                        "template": "blue",
+                        "title": {"content": _agent_name, "tag": "plain_text"},
+                    },
+                    "elements": elements,
+                }
+
+            async def _ws_on_chunk(text: str):
+                nonlocal _last_flush_time
+                if not msg_id_for_patch:
+                    return
+                _stream_buffer.append(text)
+                now = time.time()
+                if now - _last_flush_time >= _FLUSH_INTERVAL:
+                    card = _build_card(
+                        "".join(_stream_buffer),
+                        "".join(_thinking_buffer),
+                        streaming=True,
+                    )
+                    _aio.create_task(feishu_service.patch_message(
+                        config.app_id, config.app_secret, msg_id_for_patch, _json_card.dumps(card)
+                    ))
+                    _last_flush_time = now
+
+            async def _ws_on_thinking(text: str):
+                nonlocal _last_flush_time
+                if not msg_id_for_patch:
+                    return
+                _thinking_buffer.append(text)
+                now = time.time()
+                if now - _last_flush_time >= _FLUSH_INTERVAL:
+                    card = _build_card(
+                        "".join(_stream_buffer),
+                        "".join(_thinking_buffer),
+                        streaming=True,
+                    )
+                    _aio.create_task(feishu_service.patch_message(
+                        config.app_id, config.app_secret, msg_id_for_patch, _json_card.dumps(card)
+                    ))
+                    _last_flush_time = now
+
+            # Call LLM with history and streaming callback
+            reply_text = await _call_agent_llm(
+                db, agent_id, llm_user_text, history=history, user_id=platform_user_id,
+                on_chunk=_ws_on_chunk, on_thinking=_ws_on_thinking,
+            )
             _cfs.reset(_cfs_token)
+            _cfso.reset(_cfso_token)
             print(f"[Feishu] LLM reply: {reply_text[:100]}")
+
+            # Send final card update or fallback text
+            if msg_id_for_patch:
+                final_card = _build_card(
+                    reply_text,
+                    "".join(_thinking_buffer),
+                    streaming=False,
+                )
+                await feishu_service.patch_message(
+                    config.app_id, config.app_secret, msg_id_for_patch, _json_card.dumps(final_card)
+                )
+            else:
+                # Fallback to plain text if card creation failed
+                try:
+                    if chat_type == "group" and chat_id:
+                        await feishu_service.send_message(
+                            config.app_id, config.app_secret, chat_id, "text",
+                            json.dumps({"text": reply_text}), receive_id_type="chat_id",
+                        )
+                    else:
+                        await feishu_service.send_message(
+                            config.app_id, config.app_secret, sender_open_id, "text",
+                            json.dumps({"text": reply_text}),
+                        )
+                except Exception as e:
+                    print(f"[Feishu] Failed to send fallback message: {e}")
 
             # Log activity
             from app.services.activity_logger import log_activity
@@ -491,23 +704,6 @@ async def feishu_event_webhook(
             db.add(ChatMessage(agent_id=agent_id, user_id=platform_user_id, role="assistant", content=reply_text, conversation_id=session_conv_id))
             _sess.last_message_at = _dt.now(_tz.utc)
             await db.commit()
-            # Send reply via Feishu
-            try:
-                if chat_type == "group" and chat_id:
-                    await feishu_service.send_message(
-                        config.app_id, config.app_secret,
-                        chat_id, "text",
-                        json.dumps({"text": reply_text}),
-                        receive_id_type="chat_id",
-                    )
-                else:
-                    await feishu_service.send_message(
-                        config.app_id, config.app_secret,
-                        sender_open_id, "text",
-                        json.dumps({"text": reply_text}),
-                    )
-            except Exception as e:
-                print(f"[Feishu] Failed to send message: {e}")
 
     return {"code": 0, "msg": "ok"}
 
@@ -669,7 +865,7 @@ async def _download_post_images(agent_id, config, message_id, image_keys):
             print(f"[Feishu] Failed to download post image {ik}: {e}")
 
 
-async def _call_agent_llm(db: AsyncSession, agent_id: uuid.UUID, user_text: str, history: list[dict] | None = None, user_id=None) -> str:
+async def _call_agent_llm(db: AsyncSession, agent_id: uuid.UUID, user_text: str, history: list[dict] | None = None, user_id=None, on_chunk=None, on_thinking=None) -> str:
     """Call the agent's configured LLM model with conversation history.
     
     Reuses the same call_llm function as the WebSocket chat endpoint so that
@@ -714,6 +910,8 @@ async def _call_agent_llm(db: AsyncSession, agent_id: uuid.UUID, user_text: str,
             agent_id=agent_id,
             user_id=effective_user_id,
             supports_vision=getattr(model, 'supports_vision', False),
+            on_chunk=on_chunk,
+            on_thinking=on_thinking,
         )
         return reply
     except Exception as e:
