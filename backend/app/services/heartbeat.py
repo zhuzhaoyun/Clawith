@@ -226,6 +226,10 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
             reply = ""
             plaza_posts_made = 0       # hard limit: 1 new post per heartbeat
             plaza_comments_made = 0    # hard limit: 2 comments per heartbeat
+            _hb_accumulated_tokens = 0
+
+            # Token tracking helpers
+            from app.services.token_tracker import record_token_usage, extract_usage_tokens, estimate_tokens_from_chars
 
             # Convert messages to LLMMessage format
             llm_messages = [
@@ -248,6 +252,14 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
                     logger.error(f"LLM call error in heartbeat: {e}")
                     reply = ""
                     break
+
+                # Track tokens for this round
+                real_tokens = extract_usage_tokens(response.usage)
+                if real_tokens:
+                    _hb_accumulated_tokens += real_tokens
+                else:
+                    round_chars = sum(len(m.content or '') for m in llm_messages) + len(response.content or '')
+                    _hb_accumulated_tokens += estimate_tokens_from_chars(round_chars)
 
                 if response.tool_calls:
                     # Add assistant message with tool calls
@@ -298,6 +310,10 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
                 reply = ""
 
             await client.close()
+
+            # Record accumulated heartbeat token usage
+            if _hb_accumulated_tokens > 0:
+                await record_token_usage(agent_id, _hb_accumulated_tokens)
 
             # Suppress HEARTBEAT_OK
             is_ok = "HEARTBEAT_OK" in reply.upper().replace(" ", "_") if reply else False

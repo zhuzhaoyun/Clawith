@@ -129,6 +129,7 @@ class LLMStreamChunk:
     tool_call: dict | None = None
     finish_reason: str | None = None
     is_finished: bool = False
+    usage: dict | None = None
 
 
 # ============================================================================
@@ -248,6 +249,10 @@ class OpenAICompatibleClient(LLMClient):
             "stream": stream,
         }
 
+        # Request usage stats in streaming responses (OpenAI extension)
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
@@ -289,6 +294,10 @@ class OpenAICompatibleClient(LLMClient):
 
         if "error" in data:
             raise LLMError(f"Stream error: {data['error']}")
+
+        # Parse usage from stream (returned in the final chunk with include_usage)
+        if data.get("usage"):
+            chunk.usage = data["usage"]
 
         choices = data.get("choices", [])
         if not choices:
@@ -417,6 +426,7 @@ class OpenAICompatibleClient(LLMClient):
         full_reasoning = ""
         tool_calls_data: list[dict] = []
         last_finish_reason: str | None = None
+        final_usage: dict | None = None
 
         in_think = False
         tag_buffer = ""
@@ -467,6 +477,9 @@ class OpenAICompatibleClient(LLMClient):
                                 else:
                                     tc["function"]["arguments"] += str(arg_chunk)
 
+                        if chunk.usage:
+                            final_usage = chunk.usage
+
                         if chunk.finish_reason:
                             last_finish_reason = chunk.finish_reason
 
@@ -493,6 +506,7 @@ class OpenAICompatibleClient(LLMClient):
             tool_calls=tool_calls_data,
             reasoning_content=full_reasoning or None,
             finish_reason=last_finish_reason,
+            usage=final_usage,
             model=self.model,
         )
 

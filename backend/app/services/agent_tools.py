@@ -2444,6 +2444,9 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
 
             max_tool_rounds = 5
             target_reply = ""
+            _a2a_accumulated_tokens = 0
+
+            from app.services.token_tracker import record_token_usage, extract_usage_tokens, estimate_tokens_from_chars
 
             async with httpx.AsyncClient(timeout=120) as client:
                 for _round in range(max_tool_rounds):
@@ -2463,6 +2466,14 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                         headers={"Authorization": f"Bearer {target_model.api_key_encrypted}"},
                     )
                     data = resp.json()
+
+                    # Track tokens from API response
+                    real_tokens = extract_usage_tokens(data.get("usage"))
+                    if real_tokens:
+                        _a2a_accumulated_tokens += real_tokens
+                    else:
+                        round_chars = sum(len(m.get("content") or '') for m in full_msgs if isinstance(m.get("content"), str))
+                        _a2a_accumulated_tokens += estimate_tokens_from_chars(round_chars)
 
                     if "choices" not in data or not data["choices"]:
                         break
@@ -2498,6 +2509,10 @@ async def _send_message_to_agent(from_agent_id: uuid.UUID, args: dict) -> str:
                     # No tool calls — this is the final text response
                     target_reply = msg.get("content", "")
                     break
+
+            # Record accumulated A2A tokens for the target agent
+            if _a2a_accumulated_tokens > 0:
+                await record_token_usage(target.id, _a2a_accumulated_tokens)
 
             if not target_reply:
                 return f"⚠️ {target.name} did not respond (LLM returned empty)"

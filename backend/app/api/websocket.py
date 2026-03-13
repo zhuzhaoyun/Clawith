@@ -220,6 +220,10 @@ async def call_llm(
 
     max_tokens = get_max_tokens(model.provider, model.model)
 
+    # ── Per-round token accumulator ──
+    from app.services.token_tracker import record_token_usage, extract_usage_tokens, estimate_tokens_from_chars
+    _accumulated_tokens = 0
+
     # Tool-calling loop (configurable per agent, default 50)
     for round_i in range(_max_tool_rounds):
         # ── Dynamic tool-call limit warning (Pulse engine) ──
@@ -253,28 +257,28 @@ async def call_llm(
                 on_thinking=on_thinking,
             )
         except LLMError as e:
+            # Record accumulated tokens before returning error
+            if agent_id and _accumulated_tokens > 0:
+                await record_token_usage(agent_id, _accumulated_tokens)
             return f"[LLM Error] {e}"
         except Exception as e:
+            if agent_id and _accumulated_tokens > 0:
+                await record_token_usage(agent_id, _accumulated_tokens)
             return f"[LLM call error] {type(e).__name__}: {str(e)[:200]}"
+
+        # ── Track tokens for this round ──
+        real_tokens = extract_usage_tokens(response.usage)
+        if real_tokens:
+            _accumulated_tokens += real_tokens
+        else:
+            # Fallback: estimate from message content length
+            round_chars = sum(len(m.content or '') if isinstance(m.content, str) else 0 for m in api_messages) + len(response.content or '')
+            _accumulated_tokens += estimate_tokens_from_chars(round_chars)
 
         # If no tool calls, return the final content
         if not response.tool_calls:
-            # Track token usage
-            if agent_id:
-                try:
-                    async with async_session() as _db:
-                        from app.models.agent import Agent as AgentModel
-                        _ar = await _db.execute(select(AgentModel).where(AgentModel.id == agent_id))
-                        _agent = _ar.scalar_one_or_none()
-                        if _agent:
-                            total_chars = sum(len(m.content or '') for m in api_messages) + len(response.content or '')
-                            estimated_tokens = max(total_chars // 3, 1)
-                            _agent.tokens_used_today = (_agent.tokens_used_today or 0) + estimated_tokens
-                            _agent.tokens_used_month = (_agent.tokens_used_month or 0) + estimated_tokens
-                            _agent.tokens_used_total = (_agent.tokens_used_total or 0) + estimated_tokens
-                            await _db.commit()
-                except Exception:
-                    pass
+            if agent_id and _accumulated_tokens > 0:
+                await record_token_usage(agent_id, _accumulated_tokens)
             await client.close()
             return response.content or "[LLM returned empty content]"
 
@@ -344,6 +348,9 @@ async def call_llm(
                 content=str(result),
             ))
 
+    # Record tokens even on "too many rounds" exit
+    if agent_id and _accumulated_tokens > 0:
+        await record_token_usage(agent_id, _accumulated_tokens)
     await client.close()
     return "[Error] Too many tool call rounds"
 
