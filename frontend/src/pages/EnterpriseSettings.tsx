@@ -684,7 +684,8 @@ export default function EnterpriseSettings() {
     const [toolsView, setToolsView] = useState<'global' | 'agent-installed'>('global');
     const [agentInstalledTools, setAgentInstalledTools] = useState<any[]>([]);
     const loadAllTools = async () => {
-        const data = await fetchJson<any[]>('/tools');
+        const tid = selectedTenantId;
+        const data = await fetchJson<any[]>(`/tools${tid ? `?tenant_id=${tid}` : ''}`);
         setAllTools(data);
     };
     const loadAgentInstalledTools = async () => {
@@ -693,7 +694,7 @@ export default function EnterpriseSettings() {
             setAgentInstalledTools(data);
         } catch { }
     };
-    useEffect(() => { if (activeTab === 'tools') { loadAllTools(); loadAgentInstalledTools(); } }, [activeTab]);
+    useEffect(() => { if (activeTab === 'tools') { loadAllTools(); loadAgentInstalledTools(); } }, [activeTab, selectedTenantId]);
 
     // ─── Jina API Key
     const [jinaKey, setJinaKey] = useState('');
@@ -785,21 +786,21 @@ export default function EnterpriseSettings() {
 
     // ─── Approvals
     const { data: approvals = [] } = useQuery({
-        queryKey: ['approvals'],
-        queryFn: () => fetchJson<any[]>('/enterprise/approvals'),
+        queryKey: ['approvals', selectedTenantId],
+        queryFn: () => fetchJson<any[]>(`/enterprise/approvals${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`),
         enabled: activeTab === 'approvals',
     });
     const resolveApproval = useMutation({
         mutationFn: ({ id, action }: { id: string; action: string }) =>
             fetchJson(`/enterprise/approvals/${id}/resolve`, { method: 'POST', body: JSON.stringify({ action }) }),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals'] }),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals', selectedTenantId] }),
     });
 
     // ─── Audit Logs
     const BG_ACTIONS = ['supervision_tick', 'supervision_fire', 'supervision_error', 'schedule_tick', 'schedule_fire', 'schedule_error', 'heartbeat_tick', 'heartbeat_fire', 'heartbeat_error', 'server_startup'];
     const { data: auditLogs = [] } = useQuery({
-        queryKey: ['audit-logs'],
-        queryFn: () => fetchJson<any[]>('/enterprise/audit-logs?limit=200'),
+        queryKey: ['audit-logs', selectedTenantId],
+        queryFn: () => fetchJson<any[]>(`/enterprise/audit-logs?limit=200${selectedTenantId ? `&tenant_id=${selectedTenantId}` : ''}`),
         enabled: activeTab === 'audit',
     });
     const filteredAuditLogs = auditLogs.filter((log: any) => {

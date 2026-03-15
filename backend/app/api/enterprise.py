@@ -179,16 +179,23 @@ async def update_enterprise_info(
 
 @router.get("/approvals", response_model=list[ApprovalRequestOut])
 async def list_approvals(
+    tenant_id: str | None = None,
     status_filter: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List approval requests. Platform admins see all; others see their own agents."""
+    """List approval requests scoped to a tenant."""
     query = select(ApprovalRequest)
-    # Platform admins see all approvals; regular users only see their own agents'
+    # Scope by tenant: only show approvals for agents belonging to this tenant
+    tid = tenant_id or (str(current_user.tenant_id) if current_user.tenant_id else None)
+    if tid:
+        tenant_agent_ids = select(Agent.id).where(Agent.tenant_id == tid)
+        query = query.where(ApprovalRequest.agent_id.in_(tenant_agent_ids))
+    # Non-admins further restricted to their own agents
     if current_user.role != "platform_admin":
-        agent_ids = select(Agent.id).where(Agent.creator_id == current_user.id)
-        query = query.where(ApprovalRequest.agent_id.in_(agent_ids))
+        query = query.where(ApprovalRequest.agent_id.in_(
+            select(Agent.id).where(Agent.creator_id == current_user.id)
+        ))
     if status_filter:
         query = query.where(ApprovalRequest.status == status_filter)
     query = query.order_by(ApprovalRequest.created_at.desc())
@@ -233,12 +240,18 @@ async def resolve_approval(
 @router.get("/audit-logs", response_model=list[AuditLogOut])
 async def list_audit_logs(
     agent_id: uuid.UUID | None = None,
+    tenant_id: str | None = None,
     limit: int = 50,
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """List audit logs (admin only). Optionally filter by agent."""
+    """List audit logs scoped to a tenant (admin only)."""
     query = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
+    # Scope by tenant: only show logs for agents belonging to this tenant
+    tid = tenant_id or (str(current_user.tenant_id) if current_user.tenant_id else None)
+    if tid:
+        tenant_agent_ids = select(Agent.id).where(Agent.tenant_id == tid)
+        query = query.where(AuditLog.agent_id.in_(tenant_agent_ids))
     if agent_id:
         query = query.where(AuditLog.agent_id == agent_id)
     result = await db.execute(query)

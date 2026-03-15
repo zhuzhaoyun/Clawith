@@ -27,12 +27,16 @@ class SkillCreateIn(BaseModel):
 
 
 @router.get("/")
-async def list_skills():
-    """List all global skills."""
+async def list_skills(tenant_id: str | None = None):
+    """List global skills scoped by tenant (builtin + tenant-specific)."""
+    import uuid as _uuid
+    from sqlalchemy import or_ as _or
     async with async_session() as db:
-        result = await db.execute(
-            select(Skill).order_by(Skill.name)
-        )
+        query = select(Skill).order_by(Skill.name)
+        # Scope by tenant: show builtin (tenant_id is NULL) + tenant-specific skills
+        if tenant_id:
+            query = query.where(_or(Skill.tenant_id == None, Skill.tenant_id == _uuid.UUID(tenant_id)))
+        result = await db.execute(query)
         skills = result.scalars().all()
         return [
             {
