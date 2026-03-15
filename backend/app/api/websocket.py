@@ -169,7 +169,7 @@ async def call_llm(
     if supports_vision:
         import re as _re_v
         for i, msg in enumerate(api_messages):
-            if msg.role != "user" or not msg.content:
+            if msg.role != "user" or not msg.content or not isinstance(msg.content, str):
                 continue
             content_str = msg.content
             # Find [image_data:data:image/...;base64,...] markers
@@ -198,7 +198,7 @@ async def call_llm(
                 continue
             if "[image_data:" in msg.content:
                 _n_imgs = len(_re_strip.findall(_img_pattern, msg.content))
-                cleaned = _re_strip.sub('', msg.content).strip()
+                cleaned = _re_strip.sub(_img_pattern, '', msg.content).strip()
                 if _n_imgs > 0:
                     cleaned += f"\n[用户发送了 {_n_imgs} 张图片，但当前模型不支持视觉，无法查看图片内容]"
                 api_messages[i] = LLMMessage(
