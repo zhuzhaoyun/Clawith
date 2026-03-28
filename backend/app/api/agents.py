@@ -593,6 +593,7 @@ async def delete_agent(
         "gateway_messages",
         "published_pages",
         "notifications",
+        "daily_token_usage",
     ]
 
     for table in cleanup_tables:
