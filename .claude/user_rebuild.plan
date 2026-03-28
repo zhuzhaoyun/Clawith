@@ -1,0 +1,299 @@
+# User System Refactoring Plan
+
+## Context
+
+The current user system has several limitations that restrict its ability to support diverse third-party OA platforms and enterprise use cases. The existing architecture is heavily centered around Feishu with specific fields in the User model and limited multi-platform support. This refactoring addresses the need for:
+
+1. Flexible support for adding various third-party OA platforms (Feishu, DingTalk, WeCom, Microsoft Teams, etc.)
+2. SSO login with automatic association to registered enterprises
+3. Self-service registration with intelligent enterprise association based on email/mobile matching
+4. Proper user uniqueness enforcement by company ID and registration identity
+5. Future extensibility for advanced role and permission management
+
+## Current State Analysis
+
+### Existing Models
+- `User` model in `user.py` has Feishu-specific fields (`feishu_open_id`, `feishu_union_id`, `feishu_user_id`)
+- `Tenant` model has `im_provider` enum with limited providers (feishu, dingtalk, wecom, microsoft_teams, web_only)
+- `OrgDepartment` and `OrgMember` models are Feishu-centric with `feishu_id` fields
+- Authentication is handled in `auth.py` with basic username/password and Feishu OAuth
+
+### Existing Services
+- `FeishuService` in `feishu_service.py` handles Feishu OAuth and messaging
+- `OrgSyncService` in `org_sync_service.py` syncs Feishu org structure
+- Security uses JWT with bcrypt password hashing
+
+## Implementation Approach
+
+### Phase 1: Data Layer Refactoring
+
+**1.1 Create New Identity Models** (`/backend/app/models/identity.py`)
+
+Create a flexible identity provider system with these new models:
+
+- `IdentityProvider`: Represents different OA platforms with configuration data
+  - `id`: UUID primary key
+  - `provider_type`: Enum (feishu, dingtalk, wecom, microsoft_teams, saml, oauth2)
+  - `name`: Display name
+  - `is_active`: Boolean
+  - `config`: JSON configuration (client_id, client_secret, endpoints, etc.)
+  - `tenant_id`: Optional FK to tenant for enterprise-specific providers
+
+- `UserIdentity`: Stores user identities across different providers (one user can have multiple identities)
+  - `id`: UUID primary key
+  - `user_id`: FK to users table
+  - `provider_id`: FK to identity_providers table
+  - `provider_user_id`: User's ID in the external system
+  - `provider_union_id`: Cross-app user ID (if available)
+  - `identity_data`: JSON with raw profile data
+  - `is_verified`: Boolean for verified identities
+  - `last_login_at`: Timestamp
+
+- `ExternalUserProfile`: Stores detailed profile data from external providers
+  - `id`: UUID primary key
+  - `identity_id`: FK to user_identities
+  - `email`: Primary email from provider
+  - `mobile`: Phone number
+  - `display_name`: Full name
+  - `avatar_url`: Profile picture
+  - `department_name`: Org department
+  - `title`: Job title
+  - `raw_data`: Complete raw profile JSON
+  - `synced_at`: Last sync timestamp
+
+**1.2 Update User Model** (`/backend/app/models/user.py`)
+
+Maintain backward compatibility while enhancing the User model:
+- Keep legacy Feishu fields (`feishu_open_id`, `feishu_union_id`, `feishu_user_id`) - deprecated but kept for migration
+- Add generic fields for enterprise matching:
+  - `primary_email`: Normalized email for matching
+  - `primary_mobile`: Normalized mobile for matching
+  - `registration_source`: How user registered (web, feishu, dingtalk, etc.)
+- Add indexes: `tenant_id + primary_email`, `tenant_id + primary_mobile`
+- Add relationships to `UserIdentity`
+
+**1.3 Update Org Models** (`/backend/app/models/org.py`)
+
+Make org models provider-agnostic:
+- Add `provider_id` FK to `IdentityProvider` in `OrgDepartment` and `OrgMember`
+- Keep `feishu_id` as legacy field, add generic `external_id`
+- Add `provider_type` to distinguish data sources
+
+**1.4 Database Migration** (`/backend/alembic/versions/`)
+
+Create migration script:
+- Create `identity_providers`, `user_identities`, `external_user_profiles` tables
+- Add new columns to `users` table (primary_email, primary_mobile, registration_source)
+- Add indexes for efficient lookups
+- Migrate existing Feishu identities to new `UserIdentity` model
+- Create default `IdentityProvider` record for existing Feishu config
+
+### Phase 2: Authentication Enhancement
+
+**2.1 Create Generic OAuth Framework** (`/backend/app/services/auth_provider.py`)
+
+Implement abstract base class:
+```python
+class BaseAuthProvider(ABC):
+    provider_type: str
+
+    @abstractmethod
+    async def get_authorization_url(self, redirect_uri: str, state: str) -> str: ...
+
+    @abstractmethod
+    async def exchange_code_for_token(self, code: str) -> dict: ...
+
+    @abstractmethod
+    async def get_user_info(self, access_token: str) -> ExternalUserInfo: ...
+
+    @abstractmethod
+    async def find_or_create_user(self, db: AsyncSession, user_info: ExternalUserInfo) -> User: ...
+```
+
+Create concrete implementations:
+- `FeishuAuthProvider` - refactor existing Feishu OAuth
+- `DingTalkAuthProvider` - for DingTalk OAuth
+- `WeComAuthProvider` - for WeCom OAuth
+- `MicrosoftTeamsAuthProvider` - for MS Teams OAuth
+
+**2.2 Create Auth Provider Registry** (`/backend/app/services/auth_registry.py`)
+
+- Provider factory for instantiating correct provider by type
+- Configuration loader from `IdentityProvider` model
+- Caching for provider instances
+
+**2.3 Update Auth API** (`/backend/app/api/auth.py`)
+
+Add new endpoints:
+- `GET /auth/providers` - List available identity providers
+- `GET /auth/{provider}/authorize` - Start OAuth flow for provider
+- `POST /auth/{provider}/callback` - Handle OAuth callback
+- `POST /auth/{provider}/bind` - Bind external identity to existing user
+- `POST /auth/{provider}/unbind` - Unlink external identity
+
+Update existing endpoints to support SSO:
+- Modify `POST /auth/login` to support SSO token
+- Add enterprise auto-association logic
+
+**2.4 Create SSO Service** (`/backend/app/services/sso_service.py`)
+
+Implement SSO enterprise association:
+- `match_user_by_email(email, tenant_id)` - Find existing user by email
+- `match_user_by_mobile(mobile, tenant_id)` - Find existing user by mobile
+- `auto_associate_tenant(email)` - Detect tenant by email domain
+- `resolve_user_identity(provider_user_id, provider_type)` - Resolve identity
+- `link_identity(user_id, identity_data)` - Link new identity to user
+
+### Phase 3: Registration System Enhancement
+
+**3.1 Update Registration Logic** (`/backend/app/services/registration_service.py`)
+
+Create new service for intelligent registration:
+- `detect_tenant_by_email(email)` - Match email domain to tenant
+- `check_duplicate_identity(email, mobile)` - Check for existing identities
+- `create_user_with_identity(registration_data, identity_data)` - Create user with identity
+- `handle_sso_registration(user_info, provider)` - SSO-based registration flow
+
+**3.2 Update Registration API**
+
+Modify `POST /auth/register`:
+- Accept optional `provider` and `provider_token` for SSO registration
+- Add enterprise auto-detection based on email domain
+- Handle duplicate detection with merge prompts
+- Return proper error messages for identity conflicts
+
+**3.3 Unique Indexing System**
+
+Ensure proper uniqueness:
+- Unique constraint: `(tenant_id, primary_email)` on users
+- Unique constraint: `(tenant_id, primary_mobile)` on users
+- Unique constraint: `(provider_id, provider_user_id)` on user_identities
+- Handle conflicts gracefully with clear user messaging
+
+### Phase 4: Organization Synchronization
+
+**4.1 Create Generic Sync Framework** (`/backend/app/services/org_sync_adapter.py`)
+
+Create abstract sync adapter:
+```python
+class BaseOrgSyncAdapter(ABC):
+    @abstractmethod
+    async def fetch_departments(self) -> list[ExternalDepartment]: ...
+
+    @abstractmethod
+    async def fetch_users(self, department_id: str) -> list[ExternalUser]: ...
+
+    @abstractmethod
+    async def resolve_user_identity(self, external_user: ExternalUser) -> UserIdentity | None: ...
+```
+
+**4.2 Refactor Org Sync Service** (`/backend/app/services/org_sync_service.py`)
+
+- Replace Feishu-specific logic with adapter pattern
+- Support multiple concurrent sync sources
+- Enhanced conflict resolution for overlapping user identities
+- Provider-specific sync scheduling
+
+**4.3 Create Provider Sync Adapters**
+
+- `FeishuOrgSyncAdapter` - migrate existing Feishu sync
+- `DingTalkOrgSyncAdapter` - for DingTalk
+- `WeComOrgSyncAdapter` - for WeCom
+- `MicrosoftTeamsOrgSyncAdapter` - for MS Teams
+
+### Phase 5: Extensibility Foundation
+
+**5.1 Role Management Framework** (`/backend/app/models/role.py`)
+
+Create flexible role system:
+- `Role` model with hierarchical permissions
+- `UserRole` association table
+- `Permission` model for granular permissions
+- `RolePermission` association table
+- RBAC foundation with resource-based permissions
+
+**5.2 Audit Trail Enhancement** (`/backend/app/services/audit_logger.py`)
+
+Enhance existing audit logging:
+- Add identity-related events (login, bind, unbind)
+- Add tenant association events
+- Add role assignment events
+- Structured audit data for compliance
+
+**5.3 Update Configuration** (`/backend/app/config.py`)
+
+Add new configuration options:
+- `DEFAULT_IDENTITY_PROVIDER` - Default provider for new tenants
+- `SSO_AUTO_ASSOCIATE_DOMAINS` - Domains for auto-association
+- `SSO_REQUIRE_VERIFIED_EMAIL` - Require verified email for SSO
+
+## Critical Files to Create/Modify
+
+### New Files
+- `/backend/app/models/identity.py` - New identity models
+- `/backend/app/services/auth_provider.py` - Base auth provider class
+- `/backend/app/services/auth_registry.py` - Provider registry
+- `/backend/app/services/sso_service.py` - SSO business logic
+- `/backend/app/services/registration_service.py` - Registration service
+- `/backend/app/services/org_sync_adapter.py` - Sync adapter base
+- `/backend/alembic/versions/add_identity_system.py` - Migration
+
+### Modified Files
+- `/backend/app/models/user.py` - Add primary_email, primary_mobile, registration_source
+- `/backend/app/models/org.py` - Add provider_id, external_id
+- `/backend/app/models/__init__.py` - Import new models
+- `/backend/app/api/auth.py` - Multi-provider auth endpoints
+- `/backend/app/services/feishu_service.py` - Refactor to use new provider base
+- `/backend/app/services/org_sync_service.py` - Generic sync framework
+- `/backend/app/core/security.py` - Identity verification utilities
+- `/backend/alembic/env.py` - Import new models
+- `/backend/app/schemas/schemas.py` - New auth schemas
+
+## Backward Compatibility Strategy
+
+1. **Keep existing Feishu fields** in User model as deprecated
+2. **Migrate data** from old fields to new identity tables
+3. **Support legacy API** endpoints during transition period
+4. **Dual-write pattern** - write to both old and new structures during migration
+5. **Gradual deprecation** - mark old fields as deprecated in API responses
+
+## Verification Strategy
+
+1. **Unit Testing**: Test all new services and models individually
+   - Test `BaseAuthProvider` implementations
+   - Test `SSOService` matching logic
+   - Test `RegistrationService` edge cases
+
+2. **Integration Testing**: Validate multi-provider authentication flows
+   - Feishu OAuth flow end-to-end
+   - Cross-provider identity linking
+   - Enterprise auto-association
+
+3. **Migration Testing**: Ensure data integrity during migration
+   - Existing Feishu users migrated correctly
+   - Existing org structure preserved
+   - No data loss
+
+4. **Backward Compatibility Testing**: Verify existing functionality remains intact
+   - Existing Feishu login still works
+   - Existing org sync still works
+   - API responses maintain expected format
+
+5. **End-to-End Testing**: Complete user journeys including:
+   - New user registration with SSO
+   - Existing user binding to SSO
+   - Enterprise auto-association
+   - Multi-provider identity management
+
+## Implementation Order
+
+1. Create new identity models (identity.py)
+2. Create database migration
+3. Update User and Org models with new fields
+4. Create BaseAuthProvider and FeishuAuthProvider
+5. Create SSOService and RegistrationService
+6. Update auth API endpoints
+7. Refactor org sync to use adapters
+8. Create additional provider implementations (DingTalk, WeCom, etc.)
+9. Add role management framework
+10. Comprehensive testing and validation⏎

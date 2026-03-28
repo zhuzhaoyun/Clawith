@@ -608,3 +608,168 @@ async def _process_wecom_text(
             f"Replied to WeCom message: {reply_text[:80]}",
             detail={"channel": "wecom", "user_text": user_text[:200], "reply": reply_text[:500]},
         )
+
+
+# ─── OAuth Callback (SSO) ──────────────────────────────
+
+@router.get("/auth/wecom/callback")
+async def wecom_callback(
+    code: str,
+    state: str = None,
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Resolve session to get tenant context
+    from app.models.identity import SSOScanSession
+    tenant_id = None
+    if state:
+        try:
+            sid = uuid.UUID(state)
+            s_res = await db.execute(select(SSOScanSession).where(SSOScanSession.id == sid))
+            session = s_res.scalar_one_or_none()
+            if session:
+                tenant_id = session.tenant_id
+        except (ValueError, AttributeError):
+            pass
+
+    # 1. Get WeCom provider config
+    provider_query = select(IdentityProvider).where(IdentityProvider.provider_type == "wecom")
+    if tenant_id:
+        # Strict scope
+        provider_query = provider_query.where(IdentityProvider.tenant_id == tenant_id)
+    else:
+        # Fallback to unscoped
+        provider_query = provider_query.where(IdentityProvider.tenant_id.is_(None))
+
+    provider_result = await db.execute(provider_query)
+    provider = provider_result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="WeCom provider not configured for this tenant")
+
+    config = provider.config
+    corp_id = config.get("app_id") or config.get("corp_id")
+    secret = config.get("app_secret") or config.get("secret")
+
+    # 2. Exchange code for user info
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get access token
+            tok_res = await client.get(
+                "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+                params={"corpid": corp_id, "corpsecret": secret}
+            )
+            token_data = tok_res.json()
+            access_token = token_data.get("access_token")
+            if not access_token:
+                logger.error(f"WeCom token error: {token_data}")
+                return HTMLResponse(f"Auth failed: Token error")
+
+            # Get user info
+            user_res = await client.get(
+                "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo",
+                params={"access_token": access_token, "code": code}
+            )
+            wc_user = user_res.json()
+            userid = wc_user.get("UserId")
+            if not userid:
+                logger.error(f"WeCom userinfo error: {wc_user}")
+                return HTMLResponse("Auth failed: No UserId returned")
+    except Exception as e:
+        logger.error(f"WeCom login error: {e}")
+        return HTMLResponse(f"Auth failed: {str(e)}")
+
+    # 3. Fetch detailed user info (email, name) from WeCom API
+    wc_name = f"WeCom {userid}"
+    wc_email = None
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            tok_res2 = await client.get(
+                "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+                params={"corpid": corp_id, "corpsecret": secret},
+            )
+            _at2 = tok_res2.json().get("access_token", "")
+            if _at2:
+                detail_res = await client.get(
+                    "https://qyapi.weixin.qq.com/cgi-bin/user/get",
+                    params={"access_token": _at2, "userid": userid},
+                )
+                detail_data = detail_res.json()
+                if detail_data.get("errcode") == 0:
+                    wc_name = detail_data.get("name", wc_name)
+                    wc_email = detail_data.get("email") or detail_data.get("biz_mail")
+                    logger.info(f"WeCom user detail: name={wc_name}, email={wc_email}")
+                else:
+                    logger.warning(f"WeCom user/get failed (non-fatal): {detail_data}")
+    except Exception as e:
+        logger.warning(f"WeCom user detail fetch failed (non-fatal): {e}")
+
+    # 4. Find user via OrgMember (SSO users must be in the org directory)
+    from app.models.org import OrgMember
+
+    # WeCom stores userid in external_id during org sync
+    member_result = await db.execute(
+        select(OrgMember).where(
+            OrgMember.external_id == userid,
+            OrgMember.provider_id == provider.id,
+        )
+    )
+    member = member_result.scalar_one_or_none()
+
+    user = None
+    if member and member.user_id:
+        user_result = await db.execute(select(User).where(User.id == member.user_id))
+        user = user_result.scalar_one_or_none()
+
+    if user:
+        # Sync latest info on every login
+        if (not user.email or user.email.endswith("@wecom.local")) and wc_email:
+            user.email = wc_email
+        if wc_name:
+            user.display_name = wc_name
+    else:
+        # Create new User (first login or OrgMember not yet linked)
+        email = wc_email or f"{userid}@wecom.local"
+        username = wc_email.split("@")[0] if wc_email else f"wc_{userid[:12]}"
+        user = User(
+            username=username,
+            email=email,
+            display_name=wc_name,
+            password_hash=hash_password(uuid.uuid4().hex),
+            role="member",
+            tenant_id=tenant_id or provider.tenant_id,
+        )
+        db.add(user)
+        await db.flush()
+
+        # Link back to OrgMember if found
+        if member:
+            member.user_id = user.id
+
+    await db.flush()
+
+
+    # Standard login
+    token = create_access_token(str(user.id), user.role)
+
+    if state:
+        try:
+            sid = uuid.UUID(state)
+            s_res = await db.execute(select(SSOScanSession).where(SSOScanSession.id == sid))
+            session = s_res.scalar_one_or_none()
+            if session:
+                session.status = "authorized"
+                session.provider_type = "wecom"
+                session.user_id = user.id
+                session.access_token = token
+                session.error_msg = None
+                await db.commit()
+                return HTMLResponse(
+                    f"""<html><head><meta charset="utf-8" /></head>
+                    <body style="font-family: sans-serif; padding: 24px;">
+                        <div>SSO login successful. Redirecting...</div>
+                        <script>window.location.href = "/sso/entry?sid={sid}&complete=1";</script>
+                    </body></html>"""
+                )
+        except Exception as e:
+            logger.exception("Failed to update SSO session (wecom) %s", e)
+
+    return HTMLResponse(f"Logged in. Token: {token}")
