@@ -416,7 +416,7 @@ function OrgTab({ tenant }: { tenant: any }) {
                         <div style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                             {type === 'feishu' && (
                                 <>
-                                    {Array.from({ length: 8 }).map((_, i) => (
+                                    {Array.from({ length: 7 }).map((_, i) => (
                                         <div key={i} style={{ marginBottom: '6px' }}>
                                             {i + 1}. {t(`enterprise.org.syncGuide.feishu.step${i + 1}`)}
                                         </div>
@@ -441,7 +441,7 @@ function OrgTab({ tenant }: { tenant: any }) {
                             )}
                             {type === 'dingtalk' && (
                                 <>
-                                    {Array.from({ length: 5 }).map((_, i) => (
+                                    {Array.from({ length: 6 }).map((_, i) => (
                                         <div key={i} style={{ marginBottom: '6px' }}>
                                             {i + 1}. {t(`enterprise.org.syncGuide.dingtalk.step${i + 1}`)}
                                         </div>
@@ -450,7 +450,7 @@ function OrgTab({ tenant }: { tenant: any }) {
                             )}
                             {type === 'wecom' && (
                                 <>
-                                    {Array.from({ length: 4 }).map((_, i) => (
+                                    {Array.from({ length: 5 }).map((_, i) => (
                                         <div key={i} style={{ marginBottom: '6px' }}>
                                             {i + 1}. {t(`enterprise.org.syncGuide.wecom.step${i + 1}`)}
                                         </div>
@@ -671,8 +671,8 @@ function OrgTab({ tenant }: { tenant: any }) {
                                     <div style={{ padding: '0 20px 20px', background: 'var(--bg-secondary)' }}>
                                         {renderForm(idp.type, existingProvider)}
 
-                                        {/* Per-channel SSO Login toggle — only for configured, sync-capable providers */}
-                                        {existingProvider && ['feishu', 'dingtalk', 'wecom'].includes(idp.type) && (() => {
+                                        {/* Per-channel SSO Login toggle — only for configured providers */}
+                                        {existingProvider && ['feishu', 'dingtalk', 'wecom', 'oauth2'].includes(idp.type) && (() => {
                                             const ssoEnabled = !!existingProvider.sso_login_enabled;
                                             const slug = tenant?.slug || '';
                                             const domain = tenant?.sso_domain || (slug ? `${slug}.clawith.ai` : '');

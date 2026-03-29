@@ -771,21 +771,22 @@
           "step4": "Paste App ID and App Secret below → click Save",
           "step5": "Left sidebar → Permissions & Scopes → click Bulk Import/Export Permissions → paste the permission JSON below → confirm import",
           "step6": "Left sidebar → App Release → Create Version → set Availability to All Employees → Release for Review → approve it in your admin console",
-          "step7": "[For SSO] Left sidebar → Security Settings → add the Redirect URL below to the 'Redirect URL' list",
-          "step8": "[For SSO] Share the SSO Login URL below with your team; they can use it to log in with one click"
+          "step7": "If you need SSO via Feishu: Turn on the 'SSO Login' switch below, then in Feishu configure: Left menu → Security Settings → Add the 'Redirect URL' below. Share the 'SSO Login URL' with your team so they can log in via Feishu with one click."
         },
         "dingtalk": {
           "step1": "Go to open.dingtalk.com → log in → Developer Console → Create Enterprise Internal App → fill in name",
           "step2": "App Features → click Add next to Contacts",
           "step3": "App Info → copy AppKey and AppSecret",
           "step4": "Contacts Permission → enable reading permissions for Departments and Members",
-          "step5": "Paste AppKey and AppSecret below → click Save"
+          "step5": "Paste AppKey and AppSecret below → click Save",
+          "step6": "If you need SSO via DingTalk: Turn on the 'SSO Login' switch below, then in DingTalk configure: Login & Sharing → Add the 'Redirect URL' below as the Callback Domain. Share the 'SSO Login URL' with your team."
         },
         "wecom": {
           "step1": "Log in to WeCom Admin Console → Management Tools → Address Book Sync",
           "step2": "API Security → set the API visibility range to include the departments/users you want to sync",
           "step3": "Copy CorpID and Secret",
-          "step4": "Paste CorpID and Secret below → click Save"
+          "step4": "Paste CorpID and Secret below → click Save",
+          "step5": "If you need SSO via WeCom: Turn on the 'SSO Login' switch below, then in WeCom configure: App Management → Webpage Authorization → Set Trusted Domain to your URL domain. Share the 'SSO Login URL' with your team."
         }
       }
     },
