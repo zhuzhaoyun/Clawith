@@ -513,6 +513,38 @@ function OrgTab({ tenant }: { tenant: any }) {
                         )}
                     </div>
                 </div>
+
+                {/* Setup Guide for Sync Permissions */}
+                <details style={{ background: 'var(--bg-primary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-subtle)', marginBottom: '16px', fontSize: '12px' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                        👉 {t('enterprise.org.syncSetupGuide', 'Setup Guide & Required Permissions (Click to expand)')}
+                    </summary>
+                    <div style={{ marginTop: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        {p.provider_type === 'feishu' && (
+                            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                <li>Ensure you have added the following <strong>API Permissions</strong> in the Feishu Developer Console:</li>
+                                <li>- <code>contact:user.employee_id:readonly</code> (Get User ID, required for SSO)</li>
+                                <li>- <code>contact:user.base:readonly</code> (Get user basic info)</li>
+                                <li>- <code>contact:department.base:readonly</code> (Get department structure)</li>
+                                <li>- <code>contact:contact.base:readonly</code> (Address book basic read)</li>
+                                <li><strong>Important:</strong> After adding permissions, you must create and publish a new application version for them to take effect.</li>
+                            </ul>
+                        )}
+                        {p.provider_type === 'dingtalk' && (
+                            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                <li>Go to DingTalk Developer Console -{'>'} App Features -{'>'} Contacts</li>
+                                <li>Enable reading permissions for <strong>Departments</strong> and <strong>Members</strong>.</li>
+                            </ul>
+                        )}
+                        {p.provider_type === 'wecom' && (
+                            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                <li>In the WeCom Admin Console, configure the Address Book Sync app.</li>
+                                <li>Set the API visibility range to include the departments/users you want to sync.</li>
+                            </ul>
+                        )}
+                    </div>
+                </details>
+
                 <div style={{ display: 'flex', gap: '16px' }}>
                     <div style={{ width: '260px', borderRight: '1px solid var(--border-subtle)', paddingRight: '16px', maxHeight: '500px', overflowY: 'auto' }}>
                         <div style={{ padding: '6px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: !selectedDept ? 'rgba(224,238,238,0.1)' : 'transparent' }} onClick={() => setSelectedDept(null)}>
