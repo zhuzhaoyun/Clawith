@@ -226,13 +226,14 @@ const CHANNEL_REGISTRY: ChannelDef[] = [
 ];
 
 // ─── Feishu Permission JSON ─────────────────────────────
-const FEISHU_PERM_JSON = '{"scopes":{"tenant":["contact:contact.base:readonly","contact:user.base:readonly","contact:user.id:readonly","im:chat","im:message","im:message.group_at_msg:readonly","im:message.p2p_msg:readonly","im:message:send_as_bot","im:resource"],"user":[]}}';
+const FEISHU_PERM_JSON = '{"scopes":{"tenant":["contact:contact.base:readonly","contact:user.base:readonly","contact:user.employee_id:readonly","contact:user.id:readonly","im:chat","im:message","im:message.group_at_msg:readonly","im:message.p2p_msg:readonly","im:message:send_as_bot","im:resource"],"user":[]}}';
 
 const FEISHU_PERM_DISPLAY = `{
   "scopes": {
     "tenant": [
       "contact:contact.base:readonly",
       "contact:user.base:readonly",
+      "contact:user.employee_id:readonly",
       "contact:user.id:readonly",
       "im:chat",
       "im:message",
