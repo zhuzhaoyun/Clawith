@@ -766,7 +766,7 @@
       "syncGuide": {
         "feishu": {
           "step1": "Go to open.feishu.cn → log in → Developer Console → Create Enterprise Self-Built App → fill in name and description → Confirm",
-          "step2": "[For SSO] Left sidebar → Add App Capabilities → click Add next to Web App (网页应用)",
+          "step2": "[For SSO] Left sidebar → Add App Capabilities → click Add next to Web App (网页应用), and paste the SSO Login URL below into the Desktop and Mobile homepage fields",
           "step3": "Left sidebar → Credentials & Basic Info → copy App ID and App Secret",
           "step4": "Paste App ID and App Secret below → click Save",
           "step5": "Left sidebar → Permissions & Scopes → click Bulk Import/Export Permissions → paste the permission JSON below → confirm import",
