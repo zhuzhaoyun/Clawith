@@ -21,7 +21,7 @@ from email.mime.text import MIMEText
 from email.utils import formataddr, make_msgid
 
 from app.config import get_settings
-from app.services.email_service import _force_ipv4
+from app.core.email import force_ipv4, send_smtp_email
 
 logger = logging.getLogger(__name__)
 
@@ -206,24 +206,17 @@ def _send_email_with_config_sync(config: SystemEmailConfig, to: str, subject: st
     msg["Date"] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S %z")
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with _force_ipv4():
-        if config.smtp_ssl:
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(
-                config.smtp_host,
-                config.smtp_port,
-                context=context,
-                timeout=config.smtp_timeout_seconds,
-            ) as server:
-                server.login(config.smtp_username, config.smtp_password)
-                server.sendmail(config.from_address, [to], msg.as_string())
-        else:
-            with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=config.smtp_timeout_seconds) as server:
-                server.ehlo()
-                server.starttls(context=ssl.create_default_context())
-                server.ehlo()
-                server.login(config.smtp_username, config.smtp_password)
-                server.sendmail(config.from_address, [to], msg.as_string())
+    send_smtp_email(
+        host=config.smtp_host,
+        port=config.smtp_port,
+        user=config.smtp_username,
+        password=config.smtp_password,
+        from_addr=config.from_address,
+        to_addrs=[to],
+        msg_string=msg.as_string(),
+        use_ssl=config.smtp_ssl,
+        timeout=config.smtp_timeout_seconds,
+    )
 
 
 async def send_password_reset_email(

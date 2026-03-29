@@ -112,6 +112,7 @@
     "notInOrganization": "该账号不属于当前组织。",
     "serverStarting": "服务正在启动或遇到问题，请稍后重试。",
     "serverUnreachable": "无法连接服务器，请检查服务是否正在运行。",
+    "checkEmailVerification": "注册成功！请检查邮箱并点击验证链接完成邮箱验证。",
     "qrLogin": "扫码登录",
     "unifiedSSO": "统一扫码登录",
     "scanWithPlatform": "请使用 飞书 / 钉钉 / 企业微信 扫码",

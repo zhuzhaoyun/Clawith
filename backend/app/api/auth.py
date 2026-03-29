@@ -1,9 +1,10 @@
 """Authentication API routes."""
 
-import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException,Query, status
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,19 +15,17 @@ from app.models.user import User
 from app.schemas.schemas import (
     ForgotPasswordRequest,
     ResetPasswordRequest,
-    VerifyEmailRequest,
-    ResendVerificationRequest,
     IdentityBindRequest,
     IdentityUnbindRequest,
-    MultiTenantResponse,
     OAuthAuthorizeResponse,
     OAuthCallbackRequest,
-    TenantChoice,
     TokenResponse,
     UserLogin,
     UserOut,
     UserRegister,
     UserUpdate,
+    VerifyEmailRequest,
+    ResendVerificationRequest,
 )
 from sqlalchemy.orm import selectinload
 
@@ -47,54 +46,60 @@ async def get_registration_config(db: AsyncSession = Depends(get_db)):
 async def check_duplicate(
     email: str | None = Query(None, description="Email to check"),
     username: str | None = Query(None, description="Username to check"),
-    mobile: str | None = Query(None, description="Mobile to check"),
-    tenant_id: uuid.UUID | None = Query(None, description="Tenant context"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Check if email, username or mobile already exists within a tenant context.
-    If tenant_id is not provided, it checks globally (legacy/platform-admin behavior).
-    """
-    result = {"email_exists": False, "username_exists": False, "mobile_exists": False, "conflicts": []}
+    """Check if email or username already exists."""
+    result = {"email_exists": False, "username_exists": False, "conflicts": []}
 
     if email:
-        # Check email within tenant
-        query = select(User).where(User.email.ilike(email))
-        if tenant_id:
-            query = query.where(User.tenant_id == tenant_id)
-        
-        existing = await db.execute(query)
+        # Check email - use exact match (case-insensitive)
+        existing = await db.execute(
+            select(User).where(User.email.ilike(email))
+        )
         if existing.scalar_one_or_none():
             result["email_exists"] = True
-            result["conflicts"].append({"type": "email", "message": "Email already registered in this tenant"})
+            result["conflicts"].append({"type": "email", "message": "Email already registered"})
 
     if username:
-        # Check username within tenant
-        query = select(User).where(User.username == username)
-        if tenant_id:
-            query = query.where(User.tenant_id == tenant_id)
-            
-        existing = await db.execute(query)
+        existing = await db.execute(select(User).where(User.username == username))
         if existing.scalar_one_or_none():
             result["username_exists"] = True
-            result["conflicts"].append({"type": "username", "message": "Username already taken in this tenant"})
+            result["conflicts"].append({"type": "username", "message": "Username already taken"})
 
-    if mobile:
-        # Normalize mobile before checking
-        import re
-        normalized_mobile = re.sub(r"[\s\-\+]", "", mobile)
-        
-        # Check mobile within tenant
-        query = select(User).where(User.primary_mobile == normalized_mobile)
-        if tenant_id:
-            query = query.where(User.tenant_id == tenant_id)
-            
-        existing = await db.execute(query)
-        if existing.scalar_one_or_none():
-            result["mobile_exists"] = True
-            result["conflicts"].append({"type": "mobile", "message": "Mobile already registered in this tenant"})
-
-    result["has_conflict"] = result["email_exists"] or result["username_exists"] or result["mobile_exists"]
+    result["has_conflict"] = result["email_exists"] or result["username_exists"]
     return result
+
+
+async def _send_verification_email_task(
+    user: User,
+    background_tasks: BackgroundTasks,
+    settings: Any,
+) -> None:
+    """Helper to create verification token and add email task to background tasks."""
+    if not settings.SYSTEM_SMTP_HOST or not settings.SYSTEM_EMAIL_FROM_ADDRESS:
+        return
+
+    from app.services.email_verification_service import (
+        create_email_verification_token,
+        build_email_verification_url,
+        send_verification_email,
+    )
+
+    try:
+        raw_token, expires_at = await create_email_verification_token(user.id, user.email)
+        base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
+        verify_url = await build_email_verification_url(base_url, raw_token)
+        expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
+
+        background_tasks.add_task(
+            send_verification_email,
+            user.email,
+            user.display_name or user.username,
+            verify_url,
+            expiry_minutes,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to send verification email for {user.email}: {exc}")
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -114,6 +119,7 @@ async def register(
     """
     from app.config import get_settings
     settings = get_settings()
+
     # Handle SSO registration if provider info provided
     if data.provider and data.provider_code:
         from app.services.auth_registry import auth_provider_registry
@@ -148,16 +154,37 @@ async def register(
         )
 
     # Regular username/password registration
-    from app.services.registration_service import registration_service
-    
-    # Resolve tenant and role
+    # Check existing within resolved tenant (standard check)
+    existing_query = select(User).where(
+        (User.username == data.username) |
+        (User.email.ilike(data.email))
+    )
+    existing_result = await db.execute(existing_query)
+    existing_user = existing_result.scalars().first()
+
+    if existing_user:
+        if existing_user.is_active:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email already exists")
+        else:
+            # Requirement 2: Check for ANY user with same email that is inactive
+            # If found, resend verification email instead of creating new user
+            await _send_verification_email_task(existing_user, background_tasks, settings)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered but not verified. A new verification email has been sent. Please check your inbox."
+            )
+
+    # Check if this is the first user (→ platform admin + default company org_admin)
     from sqlalchemy import func
     user_count_result = await db.execute(select(func.count()).select_from(User))
     is_first_user = user_count_result.scalar() == 0
-    
+
+    # Resolve tenant and role
     tenant_uuid = None
     role = "member"
     quota_defaults: dict = {}
+
+    from app.services.registration_service import registration_service
 
     if is_first_user:
         from app.models.tenant import Tenant
@@ -188,64 +215,6 @@ async def register(
                 "quota_max_agents": tenant.default_max_agents,
                 "quota_agent_ttl_hours": tenant.default_agent_ttl_hours,
             }
-
-    # Check existing within resolved tenant
-    # Only check uniqueness if tenant is resolved (via invitation code or email domain)
-    if tenant_uuid:
-        query = select(User).where(
-            (User.username == data.username) |
-            (User.email.ilike(data.email))
-        ).where(User.tenant_id == tenant_uuid)
-
-        existing = await db.execute(query)
-        if existing.scalars().first():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email already exists in this tenant")
-
-    # Requirement 2: Check for ANY user with same email that is inactive (across any tenant)
-    # If found, resend verification email instead of creating new user
-    inactive_query = select(User).where(
-        User.email.ilike(data.email),
-        User.is_active == False
-    )
-    inactive_result = await db.execute(inactive_query)
-    inactive_user = inactive_result.scalars().first()
-
-    if inactive_user:
-        # Resend verification email
-        if settings.SYSTEM_SMTP_HOST and settings.SYSTEM_EMAIL_FROM_ADDRESS:
-            try:
-                from app.services.email_verification_service import (
-                    create_email_verification_token,
-                    build_email_verification_url,
-                    send_verification_email,
-                )
-
-                raw_token, expires_at = await create_email_verification_token(inactive_user.id, inactive_user.email)
-                base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
-                verify_url = await build_email_verification_url(base_url, raw_token)
-                expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
-
-                background_tasks.add_task(
-                    send_verification_email,
-                    inactive_user.email,
-                    inactive_user.display_name or inactive_user.username,
-                    verify_url,
-                    expiry_minutes,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already registered but not verified. A new verification email has been sent. Please check your inbox."
-                )
-            except HTTPException:
-                raise
-            except Exception as exc:
-                logger.warning(f"Failed to resend verification email for {inactive_user.email}: {exc}")
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to send verification email")
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered but not verified. Please contact administrator."
-            )
 
     # Requirement 1: Check if user is bound to an OrgMember
     is_active = True
@@ -304,28 +273,8 @@ async def register(
     token = create_access_token(str(user.id), user.role)
 
     # Send email verification for non-SSO registrations
-    if not data.provider and settings.SYSTEM_SMTP_HOST and settings.SYSTEM_EMAIL_FROM_ADDRESS:
-        try:
-            from app.services.email_verification_service import (
-                create_email_verification_token,
-                build_email_verification_url,
-                send_verification_email,
-            )
-
-            raw_token, expires_at = await create_email_verification_token(user.id, user.email)
-            base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
-            verify_url = await build_email_verification_url(base_url, raw_token)
-            expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
-
-            background_tasks.add_task(
-                send_verification_email,
-                user.email,
-                user.display_name or user.username,
-                verify_url,
-                expiry_minutes,
-            )
-        except Exception as exc:
-            logger.warning(f"Failed to send verification email for {user.email}: {exc}")
+    if not data.provider:
+        await _send_verification_email_task(user, background_tasks, settings)
 
     return TokenResponse(
         access_token=token,
@@ -334,79 +283,26 @@ async def register(
     )
 
 
-@router.post("/login")
+
+@router.post("/login", response_model=TokenResponse)
 async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Login with email and password. Supports multi-tenant selection when email matches multiple users."""
-    from app.models.tenant import Tenant
+    """Login with username and password.
+    
+    When tenant_id is provided (e.g., from a company-specific SSO domain),
+    non-platform_admin users must belong to that tenant.
+    """
+    result = await db.execute(
+        select(User)
+        .where(User.username == data.username)
+    )
+    user = result.scalar_one_or_none()
 
-    # Query all users by email (login_identifier)
-    query = select(User).where(User.email.ilike(data.login_identifier))
-    result = await db.execute(query)
-    all_users = list(result.scalars().all())
-
-    if not all_users:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    # If no tenant_id provided and multiple users exist, return tenant selection
-    if not data.tenant_id and len(all_users) > 1:
-        # Get tenant info for all users
-        tenant_ids = [u.tenant_id for u in all_users if u.tenant_id]
-        tenants_map = {}
-        if tenant_ids:
-            tenants_result = await db.execute(
-                select(Tenant).where(Tenant.id.in_(tenant_ids))
-            )
-            tenants_map = {str(t.id): t for t in tenants_result.scalars().all()}
-
-        tenant_choices = []
-        for u in all_users:
-            tenant = tenants_map.get(str(u.tenant_id)) if u.tenant_id else None
-            tenant_choices.append(TenantChoice(
-                tenant_id=u.tenant_id,
-                tenant_name=tenant.name if tenant else "No Company",
-                tenant_slug=tenant.slug if tenant else "",
-            ))
-
-        return MultiTenantResponse(
-            requires_tenant_selection=True,
-            login_identifier=data.login_identifier,
-            tenants=tenant_choices,
-        )
-
-    # Filter by tenant_id if provided
-    users = all_users
-    if data.tenant_id:
-        users = [u for u in all_users if u.tenant_id == data.tenant_id]
-        if not users:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="This account does not belong to this organization.",
-            )
-
-    # Verify password against any matching user
-    user = None
-    for u in users:
-        if verify_password(data.password, u.password_hash):
-            user = u
-            break
-
-    if not user:
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # Check if user is active
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
-
-    # Check if user's company is disabled
-    tenant = None
-    if user.tenant_id:
-        t_result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
-        tenant = t_result.scalar_one_or_none()
-        if tenant and not tenant.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your company has been disabled. Please contact the platform administrator.",
-            )
 
     # Check if email is verified (if required)
     from app.config import get_settings
@@ -417,13 +313,32 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
             detail="Email not verified. Please check your inbox or request a new verification email.",
         )
 
+    # Check if user's company is disabled
+    if user.tenant_id:
+        from app.models.tenant import Tenant
+        t_result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        tenant = t_result.scalar_one_or_none()
+        if tenant and not tenant.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your company has been disabled. Please contact the platform administrator.",
+            )
+
+    # Tenant-scoped login: when accessing from a company-specific domain,
+    # only allow users who belong to that company (platform_admin exempt)
+    if data.tenant_id and user.role != "platform_admin":
+        if str(user.tenant_id) != str(data.tenant_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account does not belong to this organization.",
+            )
+
     needs_setup = user.tenant_id is None
     token = create_access_token(str(user.id), user.role)
     return TokenResponse(
         access_token=token,
         user=UserOut.model_validate(user),
         needs_company_setup=needs_setup,
-        tenant_name=tenant.name if tenant else None,
     )
 
 
@@ -473,8 +388,6 @@ async def forgot_password(
             user.display_name or user.username,
             reset_url,
             expiry_minutes,
-            user.tenant_id,  # Pass tenant_id for tenant-specific email config
-            db,
         )
     except Exception as exc:
         logger.warning(f"Failed to process password reset email for {data.email}: {exc}")
@@ -519,15 +432,9 @@ async def update_me(
 
     # Validate username uniqueness if changing
     if "username" in update_data and update_data["username"] != current_user.username:
-        existing = await db.execute(
-            select(User).where(
-                User.username == update_data["username"],
-                User.tenant_id == current_user.tenant_id,
-                User.id != current_user.id,
-            )
-        )
+        existing = await db.execute(select(User).where(User.username == update_data["username"]))
         if existing.scalars().first():
-            raise HTTPException(status_code=409, detail="Username already taken in this tenant")
+            raise HTTPException(status_code=409, detail="Username already taken")
 
     # Validate email uniqueness within tenant if changing
     if "email" in update_data and update_data["email"] != current_user.email:
@@ -576,10 +483,7 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change current user's password. Requires old_password verification.
-
-    Synchronizes password across all users with the same email or phone number.
-    """
+    """Change current user's password. Requires old_password verification."""
     old_password = data.get("old_password", "")
     new_password = data.get("new_password", "")
 
@@ -592,36 +496,7 @@ async def change_password(
     if not verify_password(old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    # Hash the new password once
-    new_hash = hash_password(new_password)
-
-    # Update current user's password
-    current_user.password_hash = new_hash
-
-    # Find all users with the same email (case-insensitive) and update their passwords
-    if current_user.email:
-        same_email_result = await db.execute(
-            select(User).where(
-                User.email.ilike(current_user.email),
-                User.id != current_user.id,
-            )
-        )
-        same_email_users = same_email_result.scalars().all()
-        for user in same_email_users:
-            user.password_hash = new_hash
-
-    # Find all users with the same primary_mobile and update their passwords
-    if current_user.primary_mobile:
-        same_phone_result = await db.execute(
-            select(User).where(
-                User.primary_mobile == current_user.primary_mobile,
-                User.id != current_user.id,
-            )
-        )
-        same_phone_users = same_phone_result.scalars().all()
-        for user in same_phone_users:
-            user.password_hash = new_hash
-
+    current_user.password_hash = hash_password(new_password)
     await db.flush()
     return {"ok": True}
 
@@ -827,12 +702,6 @@ async def resend_verification(
 ):
     """Resend email verification link."""
     from app.config import get_settings
-    from app.services.email_verification_service import (
-        create_email_verification_token,
-        build_email_verification_url,
-        send_verification_email,
-    )
-
     settings = get_settings()
 
     # Always return success to prevent email enumeration
@@ -847,24 +716,10 @@ async def resend_verification(
     result = await db.execute(select(User).where(User.email.ilike(data.email)))
     user = result.scalar_one_or_none()
 
-    # Don't reveal if user exists
+    # Don't reveal if user exists or already verified
     if not user or user.email_verified:
         return generic_response
 
-    try:
-        raw_token, expires_at = await create_email_verification_token(user.id, user.email)
-        base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
-        verify_url = await build_email_verification_url(base_url, raw_token)
-        expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
-
-        background_tasks.add_task(
-            send_verification_email,
-            user.email,
-            user.display_name or user.username,
-            verify_url,
-            expiry_minutes,
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to resend verification email for {data.email}: {exc}")
+    await _send_verification_email_task(user, background_tasks, settings)
 
     return generic_response

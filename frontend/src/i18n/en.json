@@ -105,6 +105,7 @@
     "notInOrganization": "This account does not belong to this organization.",
     "serverStarting": "Service is starting up or experiencing issues. Please try again in a few seconds.",
     "serverUnreachable": "Unable to reach server. Please check if the service is running and try again.",
+    "checkEmailVerification": "Registration successful! Please check your email and click the verification link to verify your account.",
     "qrLogin": "QR Code Login",
     "unifiedSSO": "Unified SSO Login",
     "scanWithPlatform": "Please scan with Feishu, DingTalk, or WeCom",

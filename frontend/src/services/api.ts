@@ -149,6 +149,12 @@ export const authApi = {
 
     updateMe: (data: Partial<User>) =>
         request<User>('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
+
+    verifyEmail: (token: string) =>
+        request<{ ok: boolean; message: string }>('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }),
+
+    resendVerification: (email: string) =>
+        request<{ ok: boolean; message: string }>('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }),
 };
 
 // ─── Tenants ──────────────────────────────────────────
