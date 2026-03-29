@@ -642,6 +642,19 @@
       "disable": "Disable",
       "exportCsv": "Export CSV"
     },
+    "systemEmail": {
+      "title": "System Email Configuration",
+      "description": "Configure SMTP settings for sending system emails such as password resets and notifications.",
+      "fromAddress": "From Email Address",
+      "fromName": "From Name",
+      "smtpHost": "SMTP Host",
+      "smtpPort": "SMTP Port",
+      "username": "SMTP Username",
+      "password": "SMTP Password / App Password",
+      "timeout": "Timeout (seconds)",
+      "useSsl": "Use SSL/TLS",
+      "hint": "For Gmail, use an App Password. For QQ/163 mail, use the SMTP authorization code."
+    },
     "quotas": {
       "defaultUserQuotas": "Default User Quotas",
       "defaultsApply": "These defaults apply to newly registered users. Existing users are not affected.",

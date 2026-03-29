@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    EMAIL_VERIFICATION_REQUIRED: bool = False  # Require email verification for login
 
     # File Storage
     AGENT_DATA_DIR: str = _default_agent_data_dir()

@@ -1,5 +1,6 @@
 """Authentication API routes."""
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException,Query, status
@@ -13,6 +14,8 @@ from app.models.user import User
 from app.schemas.schemas import (
     ForgotPasswordRequest,
     ResetPasswordRequest,
+    VerifyEmailRequest,
+    ResendVerificationRequest,
     IdentityBindRequest,
     IdentityUnbindRequest,
     MultiTenantResponse,
@@ -95,7 +98,11 @@ async def check_duplicate(
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
+async def register(
+    data: UserRegister,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     """Register a new user account.
 
     The first user to register becomes the platform admin automatically and is
@@ -105,6 +112,8 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
 
     Supports optional SSO registration by providing provider + provider_code.
     """
+    from app.config import get_settings
+    settings = get_settings()
     # Handle SSO registration if provider info provided
     if data.provider and data.provider_code:
         from app.services.auth_registry import auth_provider_registry
@@ -226,6 +235,31 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
 
     needs_setup = tenant_uuid is None
     token = create_access_token(str(user.id), user.role)
+
+    # Send email verification for non-SSO registrations
+    if not data.provider and settings.SYSTEM_SMTP_HOST and settings.SYSTEM_EMAIL_FROM_ADDRESS:
+        try:
+            from app.services.email_verification_service import (
+                create_email_verification_token,
+                build_email_verification_url,
+                send_verification_email,
+            )
+
+            raw_token, expires_at = await create_email_verification_token(user.id, user.email)
+            base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
+            verify_url = await build_email_verification_url(base_url, raw_token)
+            expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
+
+            background_tasks.add_task(
+                send_verification_email,
+                user.email,
+                user.display_name or user.username,
+                verify_url,
+                expiry_minutes,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to send verification email for {user.email}: {exc}")
+
     return TokenResponse(
         access_token=token,
         user=UserOut.model_validate(user),
@@ -306,6 +340,15 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Your company has been disabled. Please contact the platform administrator.",
             )
+
+    # Check if email is verified (if required)
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.EMAIL_VERIFICATION_REQUIRED and not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please check your inbox or request a new verification email.",
+        )
 
     needs_setup = user.tenant_id is None
     token = create_access_token(str(user.id), user.role)
@@ -674,3 +717,84 @@ async def unbind_identity(
         raise HTTPException(status_code=404, detail=f"No linked identity found for provider '{provider}'")
 
     return UserOut.model_validate(current_user)
+
+
+# ─── Email Verification Endpoints ──────────────────────────────────────
+
+
+@router.post("/verify-email")
+async def verify_email(data: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
+    """Verify email address using a token from the verification email."""
+    from app.services.email_verification_service import consume_email_verification_token
+
+    token_data = await consume_email_verification_token(data.token)
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    user_id = token_data["user_id"]
+    email = token_data["email"]
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    # Check if email matches (case-insensitive)
+    if user.email.lower() != email.lower():
+        raise HTTPException(status_code=400, detail="Email mismatch")
+
+    user.email_verified = True
+    await db.flush()
+
+    return {"ok": True, "message": "Email verified successfully"}
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    data: ResendVerificationRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Resend email verification link."""
+    from app.config import get_settings
+    from app.services.email_verification_service import (
+        create_email_verification_token,
+        build_email_verification_url,
+        send_verification_email,
+    )
+
+    settings = get_settings()
+
+    # Always return success to prevent email enumeration
+    generic_response = {
+        "ok": True,
+        "message": "If an account with that email exists, a verification email has been sent.",
+    }
+
+    if not settings.SYSTEM_SMTP_HOST or not settings.SYSTEM_EMAIL_FROM_ADDRESS:
+        return generic_response
+
+    result = await db.execute(select(User).where(User.email.ilike(data.email)))
+    user = result.scalar_one_or_none()
+
+    # Don't reveal if user exists
+    if not user or user.email_verified:
+        return generic_response
+
+    try:
+        raw_token, expires_at = await create_email_verification_token(user.id, user.email)
+        base_url = settings.PUBLIC_BASE_URL or "http://localhost:3000"
+        verify_url = await build_email_verification_url(base_url, raw_token)
+        expiry_minutes = int((expires_at - datetime.now(timezone.utc)).total_seconds() // 60)
+
+        background_tasks.add_task(
+            send_verification_email,
+            user.email,
+            user.display_name or user.username,
+            verify_url,
+            expiry_minutes,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to resend verification email for {data.email}: {exc}")
+
+    return generic_response
