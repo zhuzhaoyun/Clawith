@@ -296,10 +296,10 @@ async def get_platform_timeseries(
         FROM day_series ds
         ORDER BY ds.d
     """), {
-        "range_start": (start_date - timedelta(days=30)).isoformat(),
-        "range_end": end_date.isoformat(),
-        "series_start": start_date.date().isoformat(),
-        "series_end": end_date.date().isoformat(),
+        "range_start": start_date - timedelta(days=30),
+        "range_end": end_date,
+        "series_start": start_date.date(),
+        "series_end": end_date.date(),
     })
     wau_by_day = {}
     mau_by_day = {}
