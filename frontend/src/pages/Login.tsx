@@ -156,6 +156,30 @@ export default function Login() {
                 const tokenRes = res as TokenResponse;
                 setAuth(tokenRes.user, tokenRes.access_token);
 
+                // If the user arrived via an invitation link, join the invited company
+                // before redirecting. The /tenants/join endpoint handles:
+                // - Existing user with no tenant → assigns the tenant directly
+                // - Existing user with a tenant → creates a new User record for the new tenant
+                //   and returns a new access_token scoped to that tenant.
+                if (invitationCode) {
+                    try {
+                        const joinRes = await tenantApi.join(invitationCode);
+                        if (joinRes?.access_token) {
+                            // Store the new tenant-scoped token first so that
+                            // the subsequent /auth/me call uses the correct context.
+                            localStorage.setItem('token', joinRes.access_token);
+                            const meRes = await authApi.me();
+                            setAuth(meRes, joinRes.access_token);
+                        }
+                        navigate('/');
+                        return;
+                    } catch (joinErr: any) {
+                        // If joining fails (code already used, code invalid, already a member),
+                        // just continue into the user's existing company — don't block login.
+                        console.warn('[invitation] join failed, entering original company:', joinErr.message);
+                    }
+                }
+
                 if (tokenRes.user && !tokenRes.user.tenant_id) {
                     navigate('/setup-company');
                 } else {
