@@ -6,7 +6,7 @@ import uuid
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -737,6 +737,7 @@ async def get_my_tenants(
 @router.post("/switch-tenant", response_model=TenantSwitchResponse)
 async def switch_tenant(
     data: TenantSwitchRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -773,18 +774,10 @@ async def switch_tenant(
     token = create_access_token(str(target_user.id), target_user.role)
 
     # 4. Determine redirect URL
-    redirect_url = None
+    # Determine redirect URL (Priority: sso_domain > ENV > Request > Fallback)
+    from app.services.platform_service import platform_service
+    redirect_url = await platform_service.get_tenant_sso_base_url(db, tenant, request)
 
-    # Priority 1: Tenant SSO domain — stored as full URL now (e.g. "https://acme.clawith.ai")
-    if tenant.sso_domain:
-        redirect_url = tenant.sso_domain
-
-    # Priority 2: Global public_base_url from system settings
-    if not redirect_url:
-        result = await db.execute(select(SystemSetting).where(SystemSetting.key == "platform"))
-        platform_setting = result.scalar_one_or_none()
-        if platform_setting:
-            redirect_url = platform_setting.value.get("public_base_url") or platform_setting.value.get("public_url")
 
     # Include token in redirect URL for cross-domain switching if needed
     if redirect_url:

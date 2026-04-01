@@ -4827,12 +4827,10 @@ async def _handle_set_trigger(agent_id: uuid.UUID, arguments: dict) -> str:
 
         # Return webhook URL for webhook triggers
         if ttype == "webhook":
-            from app.config import get_settings
-            settings = get_settings()
-            base = getattr(settings, 'PUBLIC_URL', '') or ''
-            if not base:
-                base = 'https://try.clawith.ai'  # fallback
+            from app.services.platform_service import platform_service
+            base = await platform_service.get_public_base_url()
             webhook_url = f"{base.rstrip('/')}/api/webhooks/t/{config['token']}"
+
             return f"✅ Webhook trigger '{name}' created.\n\nWebhook URL: {webhook_url}\n\nTell the user to configure this URL in their external service (e.g. GitHub, Grafana). When the service sends a POST to this URL, you will be woken up with the payload as context."
 
         return f"✅ Trigger '{name}' created ({ttype}). It will fire according to your config and wake you up with the reason as context."

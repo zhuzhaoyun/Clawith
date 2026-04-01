@@ -109,10 +109,6 @@ function PlatformTab() {
     const [nbSaving, setNbSaving] = useState(false);
     const [nbSaved, setNbSaved] = useState(false);
 
-    // Public URL
-    const [publicBaseUrl, setPublicBaseUrl] = useState(window.location.origin);
-    const [urlSaving, setUrlSaving] = useState(false);
-    const [urlSaved, setUrlSaved] = useState(false);
 
     // System email configuration
     const [systemEmailConfig, setSystemEmailConfig] = useState({
@@ -166,16 +162,6 @@ function PlatformTab() {
                 setNbText(d.value.text || '');
             }
         }).catch(() => { });
-        // Load Public URL
-        fetchJson<any>('/enterprise/system-settings/platform')
-            .then(d => {
-                if (d.value?.public_base_url) {
-                    setPublicBaseUrl(d.value.public_base_url);
-                }
-                // Otherwise keep initial value (window.location.origin) as suggestion
-            }).catch(() => {
-                // API failed, keep initial value (window.location.origin) as suggestion
-            });
             
         // Load System Email
         fetchJson<any>('/enterprise/system-settings/system_email_platform')
@@ -232,20 +218,6 @@ function PlatformTab() {
         setNbSaving(false);
     };
 
-    const savePublicUrl = async () => {
-        setUrlSaving(true);
-        try {
-            await fetchJson('/enterprise/system-settings/platform', {
-                method: 'PUT',
-                body: JSON.stringify({ value: { public_base_url: publicBaseUrl } }),
-            });
-            setUrlSaved(true);
-            setTimeout(() => setUrlSaved(false), 2000);
-        } catch (e) {
-            showToast('Failed to save', 'error');
-        }
-        setUrlSaving(false);
-    };
 
     const saveEmailConfig = async () => {
         setEmailConfigSaving(true);
@@ -406,30 +378,7 @@ function PlatformTab() {
                 </div>
             </div>
 
-            {/* Public URL */}
-            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
-                    {t('admin.publicUrl.title', 'Public URL')}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
-                    {t('admin.publicUrl.desc', 'The external URL used for webhook callbacks (Slack, Feishu, Discord, etc.) and published page links. Include the protocol (e.g. https://example.com).')}
-                </div>
-                <div style={{ marginBottom: '12px' }}>
-                    <input
-                        className="form-input"
-                        value={publicBaseUrl}
-                        onChange={e => setPublicBaseUrl(e.target.value)}
-                        placeholder="https://your-domain.com"
-                        style={{ fontSize: '13px' }}
-                    />
-                </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button className="btn btn-primary" onClick={savePublicUrl} disabled={urlSaving}>
-                        {urlSaving ? t('common.loading') : t('common.save', 'Save')}
-                    </button>
-                    {urlSaved && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{t('enterprise.config.saved', 'Saved')}</span>}
-                </div>
-            </div>
+
 
             {/* System Email Configuration */}
             <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
