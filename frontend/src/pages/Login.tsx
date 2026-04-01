@@ -462,31 +462,31 @@ export default function Login() {
                         <div style={{
                             position: 'fixed',
                             top: 0, left: 0, right: 0, bottom: 0,
-                            // More opaque backdrop, slightly blurred
-                            background: 'rgba(0, 0, 0, 0.72)',
-                            backdropFilter: 'blur(4px)',
-                            WebkitBackdropFilter: 'blur(4px)',
+                            background: 'rgba(5, 5, 8, 0.82)',
+                            backdropFilter: 'blur(8px)',
+                            WebkitBackdropFilter: 'blur(8px)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             zIndex: 2000,
                         }}>
-                            {/* Light card — always visible on dark background */}
+                            {/* Dark glass card — stands out via border + shadow, not color inversion */}
                             <div style={{
-                                background: '#ffffff',
+                                background: '#161620',
                                 borderRadius: '16px',
                                 padding: '32px',
                                 maxWidth: '400px',
                                 width: '90%',
-                                boxShadow: '0 24px 64px rgba(0,0,0,0.45)',
+                                border: '1px solid rgba(255, 255, 255, 0.12)',
+                                boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 32px 80px rgba(0,0,0,0.7)',
                             }}>
-                                <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: '#111827' }}>
+                                <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: 'rgba(255,255,255,0.95)' }}>
                                     {t('auth.selectOrganization', '选择公司')}
                                 </h3>
-                                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
+                                <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px', lineHeight: '1.5' }}>
                                     {t('auth.multiTenantPrompt', '该邮箱对应多个公司，请选择要登录的公司：')}
                                 </p>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     {tenantSelection.map((tenant: any) => (
                                         <button
                                             key={tenant.tenant_id}
@@ -494,22 +494,22 @@ export default function Login() {
                                             style={{
                                                 padding: '12px 16px',
                                                 borderRadius: '10px',
-                                                border: '1.5px solid #e5e7eb',
-                                                background: '#f9fafb',
-                                                color: '#111827',
+                                                border: '1px solid rgba(255,255,255,0.09)',
+                                                background: 'rgba(255,255,255,0.05)',
+                                                color: 'rgba(255,255,255,0.88)',
                                                 fontSize: '14px',
                                                 fontWeight: 500,
                                                 cursor: 'pointer',
                                                 textAlign: 'left',
-                                                transition: 'border-color 0.15s, background 0.15s',
+                                                transition: 'background 0.15s, border-color 0.15s',
                                             }}
                                             onMouseEnter={e => {
-                                                (e.currentTarget as HTMLButtonElement).style.background = '#f0f4ff';
-                                                (e.currentTarget as HTMLButtonElement).style.borderColor = '#6366f1';
+                                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.10)';
+                                                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.20)';
                                             }}
                                             onMouseLeave={e => {
-                                                (e.currentTarget as HTMLButtonElement).style.background = '#f9fafb';
-                                                (e.currentTarget as HTMLButtonElement).style.borderColor = '#e5e7eb';
+                                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
+                                                (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.09)';
                                             }}
                                         >
                                             {tenant.tenant_name} {tenant.tenant_slug && `(${tenant.tenant_slug})`}
@@ -541,21 +541,21 @@ export default function Login() {
                                         style={{
                                             padding: '12px 16px',
                                             borderRadius: '10px',
-                                            border: '1.5px dashed #d1d5db',
+                                            border: '1px dashed rgba(255,255,255,0.15)',
                                             background: 'transparent',
-                                            color: '#6b7280',
+                                            color: 'rgba(255,255,255,0.38)',
                                             fontSize: '14px',
                                             cursor: 'pointer',
                                             textAlign: 'left',
                                             transition: 'border-color 0.15s, color 0.15s',
                                         }}
                                         onMouseEnter={e => {
-                                            (e.currentTarget as HTMLButtonElement).style.borderColor = '#9ca3af';
-                                            (e.currentTarget as HTMLButtonElement).style.color = '#374151';
+                                            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.28)';
+                                            (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.6)';
                                         }}
                                         onMouseLeave={e => {
-                                            (e.currentTarget as HTMLButtonElement).style.borderColor = '#d1d5db';
-                                            (e.currentTarget as HTMLButtonElement).style.color = '#6b7280';
+                                            (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.15)';
+                                            (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.38)';
                                         }}
                                     >
                                         {t('auth.createOrJoinOrganization', 'Create or Join Organization')}
@@ -564,20 +564,26 @@ export default function Login() {
                                 <button
                                     onClick={() => setTenantSelection(null)}
                                     style={{
-                                        marginTop: '20px',
+                                        marginTop: '16px',
                                         padding: '10px 16px',
                                         borderRadius: '10px',
-                                        border: 'none',
-                                        background: '#f3f4f6',
-                                        color: '#374151',
+                                        border: '1px solid rgba(255,255,255,0.07)',
+                                        background: 'rgba(255,255,255,0.04)',
+                                        color: 'rgba(255,255,255,0.5)',
                                         fontSize: '14px',
                                         fontWeight: 500,
                                         cursor: 'pointer',
                                         width: '100%',
-                                        transition: 'background 0.15s',
+                                        transition: 'background 0.15s, color 0.15s',
                                     }}
-                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#e5e7eb'; }}
-                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f3f4f6'; }}
+                                    onMouseEnter={e => {
+                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.08)';
+                                        (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)';
+                                    }}
+                                    onMouseLeave={e => {
+                                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
+                                        (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)';
+                                    }}
                                 >
                                     {t('common.cancel', 'Cancel')}
                                 </button>
