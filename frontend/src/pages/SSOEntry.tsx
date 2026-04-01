@@ -122,6 +122,16 @@ export default function SSOEntry() {
         );
     }
 
+    // When complete=1, only show a completion spinner — no provider selection UI
+    if (complete) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: '20px', textAlign: 'center' }}>
+                <div className="login-spinner" style={{ width: '40px', height: '40px', marginBottom: '20px' }}></div>
+                <p>Completing login...</p>
+            </div>
+        );
+    }
+
     return (
         <div style={{ padding: '40px', textAlign: 'center' }}>
             <h2>Login to Clawith</h2>
