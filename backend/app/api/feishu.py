@@ -700,7 +700,12 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             _last_flush_time = time.time()
             _FLUSH_INTERVAL = 1.0  # Update Feishu once per second to avoid limits
             _agent_name = agent_obj.name if agent_obj else "AI 回复"
-            _tool_status_lines: list[str] = []
+            # Tool status tracking:
+            # - _tool_status_running: dict of call_id -> display line for tools still in flight.
+            #   Cleared when the tool completes so the "running" icon never lingers.
+            # - _tool_status_done: ordered list of completed tool status lines (trimmed to N).
+            _tool_status_running: dict[str, str] = {}
+            _tool_status_done: list[str] = []
             _patch_queue = _SerialPatchQueue()
             _heartbeat_task: asyncio.Task | None = None
             _llm_done = False
@@ -719,25 +724,36 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     answer_text: Main reply text (may be partial during streaming).
                     thinking_text: Reasoning/thinking content shown in a collapsed section.
                     streaming: If True, appends a cursor glyph to indicate in-progress output.
-                    tool_status_lines: Override the default _tool_status_lines list
-                        (used by image streaming which has its own separate list).
+                    tool_status_lines: Override list for image streaming (which maintains its
+                        own done-list; pass None to use the default text-streaming state).
                     agent_name: Override the default _agent_name (for image streaming context).
                 """
                 _name = agent_name if agent_name is not None else _agent_name
-                _status_lines = tool_status_lines if tool_status_lines is not None else _tool_status_lines
 
                 elements = []
 
-                # Tool status section: show last N lines, keeping the most recent
-                # "running" entry on top of the trimmed "done" history.
-                if _status_lines:
-                    done_lines = [l for l in _status_lines if "running" not in l.lower()]
-                    running_lines = [l for l in _status_lines if "running" in l.lower()]
-                    visible = done_lines[-_TOOL_STATUS_KEEP_LINES:] + running_lines[-1:]
-                    if visible:
+                # Tool status section.
+                # For the primary text-streaming path we use the split running/done dicts;
+                # callers may pass an explicit list (image streaming) as override.
+                if tool_status_lines is not None:
+                    # Caller-supplied override (image path): plain list, no split needed.
+                    if tool_status_lines:
                         elements.append({
                             "tag": "markdown",
-                            "content": "\n".join(visible),
+                            "content": "\n".join(tool_status_lines[-_TOOL_STATUS_KEEP_LINES:]),
+                        })
+                        elements.append({"tag": "hr"})
+                else:
+                    # Primary text-streaming path: show done history + any still-running tools.
+                    # _tool_status_running entries are removed when the tool completes,
+                    # so only genuinely in-flight tools appear here.
+                    done_visible = _tool_status_done[-_TOOL_STATUS_KEEP_LINES:]
+                    running_visible = list(_tool_status_running.values())
+                    all_visible = done_visible + running_visible
+                    if all_visible:
+                        elements.append({
+                            "tag": "markdown",
+                            "content": "\n".join(all_visible),
                         })
                         elements.append({"tag": "hr"})
 
@@ -794,7 +810,12 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 )
                 # Skip patch when content has not changed since the last flush
                 # (common during heartbeat ticks when LLM is waiting for tool results).
-                current_hash = hash("".join(_stream_buffer) + "".join(_thinking_buffer) + str(_tool_status_lines))
+                current_hash = hash(
+                    "".join(_stream_buffer)
+                    + "".join(_thinking_buffer)
+                    + str(_tool_status_done)
+                    + str(list(_tool_status_running.values()))
+                )
                 if reason == "heartbeat" and current_hash == _last_flushed_hash:
                     return
                 _last_flushed_hash = current_hash
@@ -814,16 +835,27 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                 await _flush_stream("thinking")
 
             async def _ws_on_tool_call(evt: dict):
-                """Receive tool call status events and update the card's progress section."""
+                """Receive tool call status events and update the card's progress section.
+
+                Uses the tool's call_id as the dict key so each tool shows only its
+                latest state.  When a tool completes the "running" entry is removed from
+                _tool_status_running and a "done" line is appended to _tool_status_done,
+                ensuring finished tools never linger as ⏳ in the card.
+                """
                 tool_name = evt.get("name") or "unknown_tool"
+                # Use call_id when available (unique per invocation); fall back to name.
+                call_id = evt.get("call_id") or tool_name
                 status = (evt.get("status") or "").lower()
                 if status == "running":
-                    line = f"⏳ Tool running: `{tool_name}`"
+                    # Register as in-flight; will be removed when "done" arrives.
+                    _tool_status_running[call_id] = f"⏳ Tool running: `{tool_name}`"
                 elif status == "done":
-                    line = f"✅ Tool done: `{tool_name}`"
+                    # Remove from running dict so the ⏳ icon disappears immediately.
+                    _tool_status_running.pop(call_id, None)
+                    _tool_status_done.append(f"✅ Tool done: `{tool_name}`")
                 else:
-                    line = f"ℹ️ Tool update: `{tool_name}` ({status or 'unknown'})"
-                _tool_status_lines.append(line)
+                    _tool_status_running.pop(call_id, None)
+                    _tool_status_done.append(f"ℹ️ Tool update: `{tool_name}` ({status or 'unknown'})")
                 await _flush_stream("tool")
 
             async def _heartbeat():
