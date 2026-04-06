@@ -267,9 +267,16 @@ async def _tc_browser_cleanup(agent_id: uuid.UUID, session_id: str) -> None:
 
     # Cancel any pending navigation and release mouse buttons so Chrome is in a
     # clean, stable state before the AgentBay SDK's browser.operator resumes.
-    # NOTE: We intentionally do NOT navigate to about:blank here — doing so can
-    # pollute the page list so subsequent TC sessions pick the wrong page via
-    # context.pages()[0].
+    #
+    # CRITICAL: We use CDP-level Page.stopLoading instead of DOM-level window.stop().
+    # When a TC click triggers page navigation, Chrome emits Page.frameStartedLoading
+    # to ALL connected CDP clients — including the AgentBay service's own Playwright.
+    # DOM-level window.stop() cancels the load but does NOT cause Chrome to emit the
+    # corresponding CDP-level Page.frameStoppedLoading event. This leaves the AgentBay
+    # service's Playwright stuck in "navigating" state, so its next page.goto() call
+    # hangs for 60s waiting for the "current" navigation to finish.
+    # CDP-level Page.stopLoading IS a DevTools Protocol command — Chrome properly emits
+    # lifecycle events (frameStoppedLoading) to ALL clients, clearing the stale state.
     cleanup_script = """
 const { chromium } = require('/usr/local/lib/node_modules/playwright');
 let browser;
@@ -279,10 +286,16 @@ let browser;
         const context = browser.contexts()[0];
         const pages = context.pages();
         const page = pages.slice().reverse().find(p => p.url() !== 'about:blank') || pages[pages.length - 1];
-        // Stop any pending navigation left from TC interactions
-        try { await page.evaluate(() => window.stop()); } catch(e) {}
+
+        // Use CDP Page.stopLoading instead of window.stop() — emits proper
+        // lifecycle events to ALL connected CDP clients (including AgentBay's).
+        const cdp = await page.context().newCDPSession(page);
+        try { await cdp.send('Page.stopLoading'); } catch(e) {}
+        try { await cdp.detach(); } catch(e) {}
+
         // Release any mouse buttons that may have been left pressed
         try { await page.mouse.up(); } catch(e) {}
+
         console.log('CLEANUP_OK');
     } catch(e) {
         console.error('CLEANUP_FAIL: ' + e.message);
