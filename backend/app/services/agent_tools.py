@@ -4717,6 +4717,8 @@ async def _create_on_message_trigger(
             config=config,
             reason=reason,
             focus_ref=focus_ref or None,
+            max_fires=1,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
         db.add(trigger)
         await db.commit()
